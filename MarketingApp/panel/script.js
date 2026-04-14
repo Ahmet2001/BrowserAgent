@@ -19,7 +19,11 @@ document.addEventListener("DOMContentLoaded", () => {
         lastSyncAt: null,
         expandedDirs: new Set(),
         heartbeatDirty: false,
-        heartbeat: null,
+        heartbeat: {
+            config: null,
+            status: null,
+            jobs: [],
+        },
         pendingUploadFile: null,
         social: {
             browser: null,
@@ -95,8 +99,14 @@ document.addEventListener("DOMContentLoaded", () => {
         heartbeatEditor: document.getElementById("heartbeat-editor"),
         heartbeatEnable: document.getElementById("heartbeat-enable"),
         heartbeatDisable: document.getElementById("heartbeat-disable"),
+        heartbeatReload: document.getElementById("heartbeat-reload"),
         heartbeatEnabledState: document.getElementById("heartbeat-enabled-state"),
         heartbeatMeta: document.getElementById("heartbeat-meta"),
+        heartbeatRunningState: document.getElementById("heartbeat-running-state"),
+        heartbeatRunningMeta: document.getElementById("heartbeat-running-meta"),
+        heartbeatConfigState: document.getElementById("heartbeat-config-state"),
+        heartbeatConfigMeta: document.getElementById("heartbeat-config-meta"),
+        heartbeatJobList: document.getElementById("heartbeat-job-list"),
         saveHeartbeat: document.getElementById("save-heartbeat"),
         launchBrowserVisible: document.getElementById("launch-browser-visible"),
         launchBrowserHeadless: document.getElementById("launch-browser-headless"),
@@ -235,12 +245,23 @@ document.addEventListener("DOMContentLoaded", () => {
         dom.reloadSkills.addEventListener("click", reloadSkills);
         dom.heartbeatEnable.addEventListener("click", () => toggleHeartbeat(true));
         dom.heartbeatDisable.addEventListener("click", () => toggleHeartbeat(false));
+        dom.heartbeatReload.addEventListener("click", reloadHeartbeatScheduler);
         dom.saveHeartbeat.addEventListener("click", saveHeartbeatConfig);
         dom.heartbeatEditor.addEventListener("input", () => {
             state.heartbeatDirty = true;
         });
+        dom.heartbeatJobList.addEventListener("click", (event) => {
+            const button = event.target.closest("[data-heartbeat-action]");
+            if (!button) {
+                return;
+            }
+            handleHeartbeatJobAction(
+                button.dataset.heartbeatJobId,
+                button.dataset.heartbeatAction
+            );
+        });
         dom.launchBrowserVisible.addEventListener("click", () => launchSocialBrowser(false));
-        dom.launchBrowserHeadless.addEventListener("click", () => launchSocialBrowser(true));
+        dom.launchBrowserHeadless?.addEventListener("click", () => launchSocialBrowser(false));
         dom.refreshSocial.addEventListener("click", async () => {
             await fetchSocialSnapshot();
             toast("Sosyal kuyruk yenilendi.", "success");
@@ -393,9 +414,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 : await response.text();
 
             if (!response.ok) {
-                const message = typeof payload === "string"
+                const rawDetail = typeof payload === "string"
                     ? payload
-                    : payload.detail || payload.message || "Bilinmeyen API hatası";
+                    : payload.detail ?? payload.message ?? "Bilinmeyen API hatası";
+                const message = typeof rawDetail === "string"
+                    ? rawDetail
+                    : rawDetail.message
+                        || [rawDetail.busy_owner, rawDetail.busy_label].filter(Boolean).join(" • ")
+                        || JSON.stringify(rawDetail);
                 throw new Error(message);
             }
 
@@ -432,7 +458,11 @@ document.addEventListener("DOMContentLoaded", () => {
         state.stats = payload.stats || [];
         state.pendingActions = payload.pending_actions || [];
         state.skills = payload.skills || [];
-        state.heartbeat = payload.heartbeat || null;
+        state.heartbeat = {
+            config: payload.heartbeat || null,
+            status: payload.heartbeat_status || null,
+            jobs: payload.heartbeat_jobs || [],
+        };
         state.social.browser = payload.social?.browser || null;
         state.social.queue = payload.social?.queue || { items: [] };
 
@@ -447,7 +477,7 @@ document.addEventListener("DOMContentLoaded", () => {
         renderSummary(payload.hierarchy, payload.skills, payload.pending_actions);
         renderStatsChart(payload.stats);
         renderSkills(payload.skills);
-        renderHeartbeat(payload.heartbeat || null);
+        renderHeartbeat();
         renderSocial(payload.social || { browser: null, queue: { items: [] } });
         markSync();
 
@@ -1130,58 +1160,177 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function fetchHeartbeatConfig() {
-        const data = await apiRequest("/heartbeat/config");
-        state.heartbeat = data;
+        const [config, status, jobs] = await Promise.all([
+            apiRequest("/heartbeat/config"),
+            apiRequest("/heartbeat/status"),
+            apiRequest("/heartbeat/jobs"),
+        ]);
+
+        state.heartbeat = {
+            config,
+            status,
+            jobs: Array.isArray(jobs) ? jobs : [],
+        };
+
         if (!state.heartbeatDirty) {
-            dom.heartbeatEditor.value = data.content || "";
+            dom.heartbeatEditor.value = config.content || "";
         }
-        renderHeartbeat(data);
+        renderHeartbeat();
     }
 
     async function saveHeartbeatConfig() {
-        const data = await apiRequest("/heartbeat/config", {
+        await apiRequest("/heartbeat/config", {
             method: "POST",
             body: { content: dom.heartbeatEditor.value },
         });
-        state.heartbeat = data;
         state.heartbeatDirty = false;
-        renderHeartbeat(data);
+        await fetchHeartbeatConfig();
         toast("Heartbeat config kaydedildi.", "success");
     }
 
-    function renderHeartbeat(heartbeat) {
-        const enabled = Boolean(heartbeat?.enabled);
-        const interval = heartbeat?.interval_minutes ?? "-";
-        const taskCount = heartbeat?.task_count ?? 0;
+    async function reloadHeartbeatScheduler() {
+        await apiRequest("/heartbeat/reload", { method: "POST" });
+        await fetchHeartbeatConfig();
+        toast("Heartbeat scheduler yenilendi.", "success");
+    }
+
+    function renderHeartbeat() {
+        const config = state.heartbeat?.config || {};
+        const status = state.heartbeat?.status || {};
+        const jobs = Array.isArray(state.heartbeat?.jobs) ? state.heartbeat.jobs : [];
+        const enabled = Boolean(config?.enabled);
+        const interval = config?.interval_minutes ?? "-";
+        const taskCount = config?.task_count ?? 0;
+        const activeJobName = status?.active_job_name || status?.active_job_id || "Yok";
+        const configValid = Boolean(config?.valid);
 
         dom.heartbeatEnabledState.textContent = enabled ? "Aktif" : "Kapalı";
-        dom.heartbeatMeta.textContent = `${taskCount} görev • ${interval} dk kontrol`;
+        dom.heartbeatMeta.textContent = `${taskCount} görev • legacy ${interval} dk`;
+        dom.heartbeatRunningState.textContent = status?.running
+            ? `Çalışıyor • ${activeJobName}`
+            : (status?.ready ? "Beklemede" : "Hazır değil");
+        dom.heartbeatRunningMeta.textContent = status?.last_reload_at
+            ? `Son yenileme: ${formatDateTime(status.last_reload_at)}`
+            : "Scheduler henüz yüklenmedi";
+        dom.heartbeatConfigState.textContent = configValid ? "Geçerli" : "Hatalı";
+        dom.heartbeatConfigMeta.textContent = configValid
+            ? `${status?.scheduled_job_count ?? 0} zamanlı job • ${jobs.length} toplam`
+            : (config?.validation_error || "Config doğrulanamadı");
+
         dom.heartbeatEnable.classList.toggle("primary", enabled);
         dom.heartbeatEnable.classList.toggle("ghost", !enabled);
         dom.heartbeatDisable.classList.toggle("primary", !enabled);
         dom.heartbeatDisable.classList.toggle("ghost", enabled);
+
+        dom.heartbeatJobList.innerHTML = "";
+        if (jobs.length === 0) {
+            dom.heartbeatJobList.innerHTML = '<div class="empty-copy">Tanımlı heartbeat görevi yok.</div>';
+            return;
+        }
+
+        jobs.forEach((job) => {
+            const item = document.createElement("div");
+            item.className = `stack-item heartbeat-job-item status-${job.last_status || "idle"}`;
+
+            const top = document.createElement("div");
+            top.className = "heartbeat-job-top";
+
+            const head = document.createElement("div");
+            const title = document.createElement("strong");
+            title.textContent = job.name || job.job_id;
+            const meta = document.createElement("p");
+            meta.textContent = `${job.job_id} • ${job.cron || "manual"}`;
+            head.append(title, meta);
+
+            const badge = document.createElement("span");
+            badge.className = `queue-badge status-${job.last_status || "idle"}`;
+            badge.textContent = resolveHeartbeatJobStatusLabel(job);
+            top.append(head, badge);
+
+            const info = document.createElement("p");
+            info.className = "heartbeat-job-copy";
+            info.textContent = [
+                `Next: ${formatDateTime(job.next_run_at)}`,
+                `Last: ${formatDateTime(job.last_run_at)}`,
+                `Run count: ${job.run_count ?? 0}`,
+            ].join(" • ");
+
+            const error = document.createElement("p");
+            error.className = "heartbeat-job-error";
+            error.textContent = job.last_error || "Son hata yok";
+
+            const actions = document.createElement("div");
+            actions.className = "toolbar-actions heartbeat-job-actions";
+
+            const toggle = document.createElement("button");
+            toggle.type = "button";
+            toggle.className = "btn ghost";
+            toggle.dataset.heartbeatAction = job.paused ? "resume" : "pause";
+            toggle.dataset.heartbeatJobId = job.job_id;
+            toggle.textContent = job.paused ? "Resume" : "Pause";
+            toggle.disabled = !job.enabled && !job.paused;
+
+            const run = document.createElement("button");
+            run.type = "button";
+            run.className = "btn ghost";
+            run.dataset.heartbeatAction = "run";
+            run.dataset.heartbeatJobId = job.job_id;
+            run.textContent = "Şimdi Çalıştır";
+            run.disabled = Boolean(job.running);
+
+            actions.append(toggle, run);
+            item.append(top, info, error, actions);
+            dom.heartbeatJobList.appendChild(item);
+        });
     }
 
     async function toggleHeartbeat(enabled) {
         dom.heartbeatEnable.disabled = true;
         dom.heartbeatDisable.disabled = true;
+        dom.heartbeatReload.disabled = true;
 
         try {
-            const data = await apiRequest("/heartbeat/toggle", {
+            await apiRequest("/heartbeat/toggle", {
                 method: "POST",
                 body: { enabled },
             });
-            state.heartbeat = data;
-            if (!state.heartbeatDirty) {
-                dom.heartbeatEditor.value = data.content || "";
-            }
-            renderHeartbeat(data);
+            await fetchHeartbeatConfig();
             toast(`Heartbeat ${enabled ? "açıldı" : "kapatıldı"}.`, "success");
         } catch (error) {
             toast(`Heartbeat durumu değiştirilemedi: ${error.message}`, "error");
         } finally {
             dom.heartbeatEnable.disabled = false;
             dom.heartbeatDisable.disabled = false;
+            dom.heartbeatReload.disabled = false;
+        }
+    }
+
+    async function handleHeartbeatJobAction(jobId, action) {
+        if (!jobId || !action) {
+            return;
+        }
+
+        const endpointMap = {
+            pause: `/heartbeat/jobs/${encodeURIComponent(jobId)}/pause`,
+            resume: `/heartbeat/jobs/${encodeURIComponent(jobId)}/resume`,
+            run: `/heartbeat/jobs/${encodeURIComponent(jobId)}/run`,
+        };
+
+        const endpoint = endpointMap[action];
+        if (!endpoint) {
+            return;
+        }
+
+        try {
+            await apiRequest(endpoint, { method: "POST", timeout: 20000 });
+            await fetchHeartbeatConfig();
+            if (action === "run") {
+                toast(`Job tetiklendi: ${jobId}`, "success");
+            } else {
+                toast(`Job güncellendi: ${jobId}`, "success");
+            }
+        } catch (error) {
+            toast(`Heartbeat job işlemi başarısız: ${error.message}`, "error");
         }
     }
 
@@ -1351,15 +1500,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function launchSocialBrowser(headless) {
-        const modeLabel = headless ? "headless" : "görünür";
+        const modeLabel = "görünür";
         dom.launchBrowserVisible.disabled = true;
-        dom.launchBrowserHeadless.disabled = true;
+        if (dom.launchBrowserHeadless) {
+            dom.launchBrowserHeadless.disabled = true;
+        }
 
         try {
             const payload = await apiRequest("/social/browser/launch", {
                 method: "POST",
                 body: {
-                    headless,
+                    headless: false,
                     restart_if_needed: true,
                 },
                 timeout: 35000,
@@ -1371,7 +1522,9 @@ document.addEventListener("DOMContentLoaded", () => {
             toast(`Tarayıcı ${modeLabel} modda başlatılamadı: ${error.message}`, "error");
         } finally {
             dom.launchBrowserVisible.disabled = false;
-            dom.launchBrowserHeadless.disabled = false;
+            if (dom.launchBrowserHeadless) {
+                dom.launchBrowserHeadless.disabled = false;
+            }
         }
     }
 
@@ -1463,11 +1616,38 @@ document.addEventListener("DOMContentLoaded", () => {
             new: "Yeni",
             drafted: "Taslak",
             approved: "Onaylı",
+            pending_verify: "Dogrulaniyor",
             sent: "Gönderildi",
             skipped: "Geçildi",
             error: "Hata",
         };
         return labels[status] || "Yeni";
+    }
+
+    function resolveHeartbeatJobStatusLabel(job) {
+        if (!job) {
+            return "Beklemede";
+        }
+        if (!job.enabled) {
+            return "Disabled";
+        }
+        if (job.running) {
+            return "Çalışıyor";
+        }
+        if (job.paused) {
+            return "Paused";
+        }
+
+        const labels = {
+            idle: "Beklemede",
+            success: "Başarılı",
+            skipped: "Atlandı",
+            error: "Hata",
+            disabled: "Disabled",
+            paused: "Paused",
+            running: "Çalışıyor",
+        };
+        return labels[job.last_status] || "Beklemede";
     }
 
     function formatDateTime(value) {

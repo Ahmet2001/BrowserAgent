@@ -24,7 +24,7 @@ from .runtime_config import (
     get_openai_compat_base_url,
     get_provider_display_name,
 )
-from MarketingApp.araclar import BASE_ARACLAR
+from MarketingApp.araclar import BASE_ARACLAR, BROWSER_ARACLARI
 
 
 INPUT_RATE = 16000
@@ -36,16 +36,12 @@ DEFAULT_TOOL_TIMEOUT_SECONDS = 150.0
 SYSTEM_INSTRUCTION = """
 Sen "Mimar" projesinin merkezi orkestratorusun.
 
-Gecerli ajan kadrosu gecici olarak sadeleştirildi:
-- browser_agent: Selenium ile tarayici uzerinde DOM tabanli islemler yapar.
-
 CALISMA KURALLARI:
-1. Tarayici uzerinde form doldurma, gezinme, yorum okuma, yorum yazma gibi web tabanli islerde browser_agent kullan.
-2. Basit dosya ve workspace islemlerinde uygun base tool'lari dogrudan kullan.
+1. X (Twitter), Instagram ve YouTube ile ilgili TUM sosyal medya gorevlerini `sosyal_medya_agent` alt ajanina devret. Bu ajan post yayinlama, yorum, begeni, takip, bildirim tarama, piyasa analizi, trend kontrolu ve icerik uretimi gibi tum sosyal medya islemlerini yonetir.
+2. Basit dosya ve workspace islemlerinde (okuma, yazma, listeleme) base tool'lari dogrudan kullan.
 3. Uzun icerikleri sesli yanit gibi dusunme; metni `metinle_cevapla` veya `ekrana_yazdir` ile ilet.
-4. Karmaşık gorevlerde adim adim ilerle, gereksiz ajan cagrisi yapma.
-5. Gecerli tek alt ajan browser_agent'tir; baska submodel varmis gibi davranma.
-6. Yanitlarini Turkce ver.
+4. Karmasik gorevlerde adim adim ilerle, gereksiz ajan cagrisi yapma.
+5. Yanitlarini Turkce ver.
 """
 
 
@@ -74,7 +70,10 @@ class BaseModel:
         )
         self._current_image = None
 
-        submodels = [sm for sm in get_all_submodels() if sm.name == "browser_agent"]
+        _allowed = {"sosyal_medya_agent"}
+        if BROWSER_ARACLARI:
+            _allowed.add("browser_agent")
+        submodels = [sm for sm in get_all_submodels() if sm.name in _allowed]
         self.submodels = submodels
         self._submodel_funcs, self._submodel_func_map = self._build_submodel_functions(submodels)
 
@@ -89,7 +88,6 @@ class BaseModel:
 
         from MarketingApp.araclar import (
             ARAMA_ARACLARI,
-            BROWSER_ARACLARI,
             KOD_ARACLARI,
             SISTEM_ARACLARI,
             VLM_ARACLARI,

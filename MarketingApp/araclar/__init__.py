@@ -75,30 +75,84 @@ except Exception as vlm_import_error:
 
 try:
     from .social_browser_workflow import (
+        launch_social_browser,
+        close_social_browser,
+        open_social_page,
+        launch_x_browser,
+        close_x_browser,
+        open_x_page,
         get_x_queue,
         get_browser_status,
         scan_x_page,
         scan_x_notifications,
         snapshot_x_feed,
         save_x_market_snapshot,
+        search_x_posts,
+        get_x_trends,
+        inspect_x_profile,
+        inspect_x_post,
+        like_x_post,
+        bookmark_x_post,
+        repost_x_post,
+        quote_x_post,
+        follow_x_account,
+        engage_with_x_post,
         update_queue_item,
         send_x_reply,
         publish_x_post,
+        publish_x_thread,
         reply_to_x_post,
         mark_queue_item,
+        inspect_instagram_profile,
+        inspect_instagram_post,
+        like_instagram_post,
+        follow_instagram_account,
+        comment_instagram_post,
+        search_youtube_videos,
+        inspect_youtube_channel,
+        inspect_youtube_video,
+        like_youtube_video,
+        subscribe_youtube_channel,
     )
 except Exception as social_import_error:
+    launch_social_browser = _missing_tool("launch_social_browser", social_import_error)
+    close_social_browser = _missing_tool("close_social_browser", social_import_error)
+    open_social_page = _missing_tool("open_social_page", social_import_error)
+    launch_x_browser = _missing_tool("launch_x_browser", social_import_error)
+    close_x_browser = _missing_tool("close_x_browser", social_import_error)
+    open_x_page = _missing_tool("open_x_page", social_import_error)
     get_x_queue = _missing_tool("get_x_queue", social_import_error)
     get_browser_status = _missing_tool("get_browser_status", social_import_error)
     scan_x_page = _missing_tool("scan_x_page", social_import_error)
     scan_x_notifications = _missing_tool("scan_x_notifications", social_import_error)
     snapshot_x_feed = _missing_tool("snapshot_x_feed", social_import_error)
     save_x_market_snapshot = _missing_tool("save_x_market_snapshot", social_import_error)
+    search_x_posts = _missing_tool("search_x_posts", social_import_error)
+    get_x_trends = _missing_tool("get_x_trends", social_import_error)
+    inspect_x_profile = _missing_tool("inspect_x_profile", social_import_error)
+    inspect_x_post = _missing_tool("inspect_x_post", social_import_error)
+    like_x_post = _missing_tool("like_x_post", social_import_error)
+    bookmark_x_post = _missing_tool("bookmark_x_post", social_import_error)
+    repost_x_post = _missing_tool("repost_x_post", social_import_error)
+    quote_x_post = _missing_tool("quote_x_post", social_import_error)
+    follow_x_account = _missing_tool("follow_x_account", social_import_error)
+    engage_with_x_post = _missing_tool("engage_with_x_post", social_import_error)
     update_queue_item = _missing_tool("update_queue_item", social_import_error)
     send_x_reply = _missing_tool("send_x_reply", social_import_error)
     publish_x_post = _missing_tool("publish_x_post", social_import_error)
+    publish_x_thread = _missing_tool("publish_x_thread", social_import_error)
     reply_to_x_post = _missing_tool("reply_to_x_post", social_import_error)
     mark_queue_item = _missing_tool("mark_queue_item", social_import_error)
+    inspect_instagram_profile = _missing_tool("inspect_instagram_profile", social_import_error)
+    inspect_instagram_post = _missing_tool("inspect_instagram_post", social_import_error)
+    like_instagram_post = _missing_tool("like_instagram_post", social_import_error)
+    follow_instagram_account = _missing_tool("follow_instagram_account", social_import_error)
+    comment_instagram_post = _missing_tool("comment_instagram_post", social_import_error)
+    search_youtube_videos = _missing_tool("search_youtube_videos", social_import_error)
+    inspect_youtube_channel = _missing_tool("inspect_youtube_channel", social_import_error)
+    inspect_youtube_video = _missing_tool("inspect_youtube_video", social_import_error)
+    like_youtube_video = _missing_tool("like_youtube_video", social_import_error)
+    subscribe_youtube_channel = _missing_tool("subscribe_youtube_channel", social_import_error)
 
 
 try:
@@ -195,38 +249,77 @@ BASE_ARACLAR = [
     workspace_listele,
     rol_oku,
     rol_guncelle,
+]
+
+SOSYAL_MEDYA_ARACLARI = [
+    # --- Tarayici yonetimi ---
+    launch_social_browser,
+    close_social_browser,
+    open_social_page,
+    # --- X (Twitter) ---
+    launch_x_browser,
+    close_x_browser,
+    open_x_page,
     get_browser_status,
     get_x_queue,
     scan_x_page,
     scan_x_notifications,
     snapshot_x_feed,
     save_x_market_snapshot,
+    search_x_posts,
+    get_x_trends,
+    inspect_x_profile,
+    inspect_x_post,
+    like_x_post,
+    bookmark_x_post,
+    repost_x_post,
+    quote_x_post,
+    follow_x_account,
+    engage_with_x_post,
     update_queue_item,
     send_x_reply,
     publish_x_post,
+    publish_x_thread,
     reply_to_x_post,
     mark_queue_item,
+    # --- Instagram ---
+    inspect_instagram_profile,
+    inspect_instagram_post,
+    like_instagram_post,
+    follow_instagram_account,
+    comment_instagram_post,
+    # --- YouTube ---
+    search_youtube_videos,
+    inspect_youtube_channel,
+    inspect_youtube_video,
+    like_youtube_video,
+    subscribe_youtube_channel,
+    # --- Workspace (strateji/log dosyalari icin) ---
+    workspace_oku,
+    workspace_sonunu_oku,
+    workspace_yaz,
+    workspace_listele,
 ]
 
 SISTEM_ARACLARI = [
     terminal_komut_calistir,
-    sistem_get_system_status,
-    workspace_yaz,
-    workspace_oku,
-    workspace_sonunu_oku,
-    workspace_listele,
-    workspace_sil,
-    workspace_ekle,
     bellek_yaz,
     bellek_oku,
     bellek_sil,
+    workspace_yaz,
+    workspace_oku,
+    workspace_sonunu_oku,
+    workspace_ekle,
+    workspace_listele,
+    rol_oku,
+    sistem_get_system_status,
 ]
 
 ARAMA_ARACLARI = [
     web_arama,
-    workspace_yaz,
     workspace_oku,
     workspace_sonunu_oku,
+    workspace_yaz,
     workspace_ekle,
     workspace_listele,
 ]
@@ -236,7 +329,7 @@ KOD_ARACLARI = [
     workspace_yaz,
     workspace_oku,
     workspace_sonunu_oku,
-    workspace_ekle,
+    workspace_listele,
 ]
 
 VLM_ARACLARI = [
@@ -251,7 +344,9 @@ VLM_ARACLARI = [
     get_pixel_color,
 ]
 
-BROWSER_ARACLARI = [
+GENERIC_BROWSER_TOOLS_ACTIVE = False
+
+BROWSER_ARACLARI = [] if not GENERIC_BROWSER_TOOLS_ACTIVE else [
     browser_baslat,
     browser_baglan,
     browser_chrome_baslat,
@@ -292,14 +387,17 @@ _loaded_skills = load_skills()
 
 _AGENT_TOOL_MAP = {
     "base": BASE_ARACLAR,
+    "sosyal_medya_agent": SOSYAL_MEDYA_ARACLARI,
     "sistem_agent": SISTEM_ARACLARI,
     "arastirma_agent": ARAMA_ARACLARI,
     "kod_agent": KOD_ARACLARI,
     "vlm_agent": VLM_ARACLARI,
-    "browser_agent": BROWSER_ARACLARI,
+    "browser_agent": BROWSER_ARACLARI if GENERIC_BROWSER_TOOLS_ACTIVE else None,
 }
 
 for agent_name, tool_list in _AGENT_TOOL_MAP.items():
+    if tool_list is None:
+        continue
     skills = get_active_skills(agent=agent_name)
     if skills:
         tool_list.extend(skills)

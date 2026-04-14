@@ -5,7 +5,7 @@ Kripto/X hesabini yuksek frekansli ama tekrar etmeyen post, reply ve dis etkileÅ
 
 ## Buyume Kaldiraclari
 1. Sik gorunurluk
-- Gunde 50 post hedefi
+- Gunde 12 planli post hedefi, gerekirse 15-18 bandina kadar cik
 - Her post kisa, tek fikirli ve 240 karakter sinirinda
 
 2. Konusma icinde kalmak
@@ -47,6 +47,7 @@ Kripto/X hesabini yuksek frekansli ama tekrar etmeyen post, reply ve dis etkileÅ
 - 240 karakter ustune cikma
 - Gereksiz emoji kullanma
 - Kopya kalip kullanma
+- Bir gunde gereksiz frekans artisina gitme; kaliteyi hizdan onde tut
 
 ## Cesitlilik Kurali
 Bugun icinde donusumlu olarak su basliklardan sec:

@@ -19,12 +19,27 @@ Amac:
 
 ### Her 30 Dakika - Posting Loop
 Amac:
-- Tek ana fikirli, en fazla 240 karakterlik yeni bir post paylas
+- Bu slot artik kapali; ana postlar sabit saat pencerelerinde atilir
 - Market state ve idea pool kullanarak konu rotasyonu yap
 
-### Ek Slotlar
+### Gunluk 12 Post Slotu
 Amac:
-- Gunluk 50 post hedefine yaklasmak icin 2 ek post slotu kullan
+- Daha insan gibi gorunen, daha guvenli bir ritimde paylasim yapmak
+- Toplam gunluk planli post sayisini 12'de tutmak
+
+Saatler:
+- 09:05
+- 10:20
+- 11:40
+- 13:00
+- 14:20
+- 15:45
+- 17:05
+- 18:30
+- 19:50
+- 21:10
+- 22:35
+- 23:55
 
 ## Post Uretim Kurali
 1. `social/market_state.md` oku

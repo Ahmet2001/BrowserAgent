@@ -10,4 +10,4 @@ Bu, periyodik olarak tetiklenen bir sosyal medya izleme görevidir. Görevin ba�
 - [ ] 5. **Raporlama (@sistem_agent):** Önemli etkileşimlerin `reports/social_media_report.md` dosyasına kaydedilmesi ve Telegram üzerinden kullanıcıya bildirilmesi.
 
 ## Mevcut Durum:
-Adım 1'de kalınmıştır. Aktif sosyal medya hesaplarına ait yapılandırma veya oturum bilgileri bellekte veya çalışma alanında bulunmamaktadır. Göreve devam edebilmek için hangi platformların (Twitter/X, Instagram, LinkedIn vb.) izleneceğinin ve bu platformlara erişim yönteminin (API veya `browser_agent` ile manuel oturum) tanımlanması gerekmektedir.
+Adım 1'de kalınmıştır. Aktif sosyal medya hesaplarına ait yapılandırma veya oturum bilgileri bellekte veya çalışma alanında bulunmamaktadır. Göreve devam edebilmek için hangi platformların (Twitter/X, Instagram, YouTube vb.) izleneceğinin ve bu platformlara erişim yönteminin (API veya yuksek seviyeli sosyal workflow araclari ile oturum) tanımlanması gerekmektedir.

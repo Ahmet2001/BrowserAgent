@@ -10,10 +10,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel as PydanticBaseModel
 from typing import Optional, Dict, Any
 
-try:
-    import yaml
-except Exception:
-    yaml = None
+from MarketingApp.enviroments.automation_runtime import (
+    release_automation,
+    try_acquire_automation,
+)
+from MarketingApp.enviroments import heartbeat as heartbeat_runtime
 
 app = FastAPI()
 
@@ -114,6 +115,29 @@ def set_base_model(bm):
     _base_model = bm
 
 
+def _busy_http_detail(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "message": "Otomasyon meşgul",
+        "busy_owner": snapshot.get("owner") or "",
+        "busy_label": snapshot.get("label") or snapshot.get("job_id") or "",
+        "busy_started_at": snapshot.get("started_at"),
+        "busy_source": snapshot.get("source") or "",
+    }
+
+
+async def _acquire_panel_mutation(label: str, source: str) -> str:
+    job_id = f"panel-{source}-{int(time.time() * 1000)}"
+    acquired, snapshot = await try_acquire_automation(
+        "panel",
+        job_id=job_id,
+        label=label,
+        source=source,
+    )
+    if not acquired:
+        raise HTTPException(status_code=409, detail=_busy_http_detail(snapshot))
+    return job_id
+
+
 def _load_social_workflow():
     try:
         from MarketingApp.araclar.social_browser_workflow import (
@@ -193,35 +217,7 @@ def _read_heartbeat_content() -> str:
 
 
 def _parse_heartbeat_meta(content: str) -> dict[str, Any]:
-    fallback = {
-        "enabled": False,
-        "interval_minutes": 30,
-        "task_count": 0,
-    }
-    if not content.strip() or yaml is None:
-        return fallback
-    try:
-        parsed = yaml.safe_load(content) or {}
-        tasks = parsed.get("tasks", []) or []
-        return {
-            "enabled": bool(parsed.get("enabled", False)),
-            "interval_minutes": int(parsed.get("interval_minutes", 30) or 30),
-            "task_count": len(tasks),
-        }
-    except Exception:
-        return fallback
-
-
-def _set_heartbeat_enabled_in_content(content: str, enabled: bool) -> str:
-    enabled_line = f"enabled: {'true' if enabled else 'false'}"
-    if re.search(r"(?m)^\s*enabled\s*:\s*(true|false)\s*$", content):
-        return re.sub(
-            r"(?m)^\s*enabled\s*:\s*(true|false)\s*$",
-            enabled_line,
-            content,
-            count=1,
-        )
-    return f"{enabled_line}\n\n{content.lstrip()}" if content.strip() else f"{enabled_line}\n"
+    return heartbeat_runtime.summarize_config_content(content)
 
 
 async def _generate_social_reply(item: dict[str, Any], tone: str) -> str:
@@ -297,6 +293,8 @@ async def get_panel_bootstrap():
         "pending_actions": await get_pending_actions(),
         "skills": await get_skills_list(),
         "heartbeat": await get_heartbeat_config(),
+        "heartbeat_status": await get_heartbeat_status(),
+        "heartbeat_jobs": await get_heartbeat_jobs(),
         "social": _build_social_snapshot(),
     }
 
@@ -523,12 +521,27 @@ async def get_heartbeat_config():
 @app.post("/api/heartbeat/config")
 async def update_heartbeat_config(data: ContentUpdate):
     """Heartbeat yapılandırmasını günceller."""
+    try:
+        heartbeat_runtime.parse_config_content(data.content)
+    except heartbeat_runtime.HeartbeatConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     config_path = _get_heartbeat_config_path()
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         f.write(data.content)
+
+    runtime_error = None
+    try:
+        await heartbeat_runtime.reload_heartbeat_service(reason="api_config_update")
+    except RuntimeError as exc:
+        runtime_error = str(exc)
+    except heartbeat_runtime.HeartbeatConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     return {
         "status": "success",
+        "runtime_error": runtime_error,
         **_parse_heartbeat_meta(data.content),
     }
 
@@ -537,17 +550,90 @@ async def update_heartbeat_config(data: ContentUpdate):
 async def toggle_heartbeat(data: HeartbeatToggleRequest):
     """Heartbeat'i panelden hızlıca açıp kapatır."""
     content = _read_heartbeat_content()
-    updated_content = _set_heartbeat_enabled_in_content(content, data.enabled)
+    updated_content = heartbeat_runtime.set_enabled_in_content(content, data.enabled)
+    try:
+        heartbeat_runtime.parse_config_content(updated_content)
+    except heartbeat_runtime.HeartbeatConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     config_path = _get_heartbeat_config_path()
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         f.write(updated_content)
 
+    runtime_error = None
+    try:
+        await heartbeat_runtime.reload_heartbeat_service(reason="api_toggle")
+    except RuntimeError as exc:
+        runtime_error = str(exc)
+    except heartbeat_runtime.HeartbeatConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     return {
         "status": "success",
         "content": updated_content,
+        "runtime_error": runtime_error,
         **_parse_heartbeat_meta(updated_content),
     }
+
+
+@app.get("/api/heartbeat/status")
+async def get_heartbeat_status():
+    return heartbeat_runtime.get_heartbeat_status_snapshot()
+
+
+@app.get("/api/heartbeat/jobs")
+async def get_heartbeat_jobs():
+    return heartbeat_runtime.get_heartbeat_jobs_snapshot()
+
+
+@app.post("/api/heartbeat/reload")
+async def reload_heartbeat():
+    try:
+        status = await heartbeat_runtime.reload_heartbeat_service(reason="api_reload")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except heartbeat_runtime.HeartbeatConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "status": "success",
+        "heartbeat_status": status,
+        "heartbeat_jobs": heartbeat_runtime.get_heartbeat_jobs_snapshot(),
+    }
+
+
+@app.post("/api/heartbeat/jobs/{job_id}/pause")
+async def pause_heartbeat_job_endpoint(job_id: str):
+    try:
+        job = await heartbeat_runtime.pause_heartbeat_job(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Heartbeat job bulunamadi")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"status": "success", "job": job}
+
+
+@app.post("/api/heartbeat/jobs/{job_id}/resume")
+async def resume_heartbeat_job_endpoint(job_id: str):
+    try:
+        job = await heartbeat_runtime.resume_heartbeat_job(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Heartbeat job bulunamadi")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"status": "success", "job": job}
+
+
+@app.post("/api/heartbeat/jobs/{job_id}/run")
+async def run_heartbeat_job_endpoint(job_id: str):
+    try:
+        result = await heartbeat_runtime.run_heartbeat_job(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Heartbeat job bulunamadi")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return result
 
 # --- SOCIAL BROWSER WORKFLOW ---
 
@@ -559,6 +645,7 @@ async def get_social_browser_status():
 
 @app.post("/api/social/browser/launch")
 async def launch_social_browser(data: SocialBrowserLaunchRequest):
+    lease_id = await _acquire_panel_mutation("Panel tarayici baslatma", "social_browser_launch")
     workflow = _load_social_workflow()
     try:
         return workflow["launch_x_browser"](
@@ -567,6 +654,8 @@ async def launch_social_browser(data: SocialBrowserLaunchRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Tarayici baslatilamadi: {e}")
+    finally:
+        await release_automation("panel", job_id=lease_id)
 
 
 @app.get("/api/social/x/queue")
@@ -577,29 +666,37 @@ async def get_social_x_queue():
 
 @app.post("/api/social/x/scan")
 async def social_scan_x_page(data: SocialScanRequest):
+    lease_id = await _acquire_panel_mutation("Panel X tarama", "social_x_scan")
     workflow = _load_social_workflow()
     limit = max(1, min(int(data.limit or 20), 50))
     try:
         return workflow["scan_x_page"](limit=limit)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"X sayfasi taranamadi: {e}")
+    finally:
+        await release_automation("panel", job_id=lease_id)
 
 
 @app.post("/api/social/x/queue/{queue_id}/draft")
 async def social_generate_x_draft(queue_id: str, data: SocialDraftRequest):
+    lease_id = await _acquire_panel_mutation("Panel taslak uretimi", "social_x_draft")
     workflow = _load_social_workflow()
-    queue = workflow["get_x_queue"]()
-    item = next((entry for entry in queue.get("items", []) if entry.get("queue_id") == queue_id), None)
-    if not item:
-        raise HTTPException(status_code=404, detail="Queue item bulunamadi")
+    try:
+        queue = workflow["get_x_queue"]()
+        item = next((entry for entry in queue.get("items", []) if entry.get("queue_id") == queue_id), None)
+        if not item:
+            raise HTTPException(status_code=404, detail="Queue item bulunamadi")
 
-    draft_text = await _generate_social_reply(item, data.tone or "")
-    updated = workflow["update_queue_item"](queue_id, draft_reply=draft_text, status="drafted")
-    return {"status": "success", "item": updated, "draft": draft_text}
+        draft_text = await _generate_social_reply(item, data.tone or "")
+        updated = workflow["update_queue_item"](queue_id, draft_reply=draft_text, status="drafted")
+        return {"status": "success", "item": updated, "draft": draft_text}
+    finally:
+        await release_automation("panel", job_id=lease_id)
 
 
 @app.post("/api/social/x/queue/{queue_id}/update")
 async def social_update_x_draft(queue_id: str, data: SocialReplyUpdate):
+    lease_id = await _acquire_panel_mutation("Panel taslak guncelleme", "social_x_update")
     workflow = _load_social_workflow()
     try:
         status = "drafted" if data.text.strip() else "new"
@@ -609,10 +706,13 @@ async def social_update_x_draft(queue_id: str, data: SocialReplyUpdate):
         raise HTTPException(status_code=404, detail="Queue item bulunamadi")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Taslak guncellenemedi: {e}")
+    finally:
+        await release_automation("panel", job_id=lease_id)
 
 
 @app.post("/api/social/x/queue/{queue_id}/status")
 async def social_mark_x_queue_item(queue_id: str, data: SocialQueueStatusUpdate):
+    lease_id = await _acquire_panel_mutation("Panel queue durum guncelleme", "social_x_status")
     workflow = _load_social_workflow()
     try:
         item = workflow["mark_queue_item"](queue_id, data.status, note=data.note)
@@ -621,10 +721,13 @@ async def social_mark_x_queue_item(queue_id: str, data: SocialQueueStatusUpdate)
         raise HTTPException(status_code=404, detail="Queue item bulunamadi")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Queue item guncellenemedi: {e}")
+    finally:
+        await release_automation("panel", job_id=lease_id)
 
 
 @app.post("/api/social/x/queue/{queue_id}/send")
 async def social_send_x_reply(queue_id: str, data: Optional[SocialReplyUpdate] = None):
+    lease_id = await _acquire_panel_mutation("Panel X reply gonderimi", "social_x_send")
     workflow = _load_social_workflow()
     reply_text = data.text if data and data.text is not None else None
     try:
@@ -638,3 +741,5 @@ async def social_send_x_reply(queue_id: str, data: Optional[SocialReplyUpdate] =
         except Exception:
             pass
         raise HTTPException(status_code=400, detail=f"Reply gonderilemedi: {e}")
+    finally:
+        await release_automation("panel", job_id=lease_id)

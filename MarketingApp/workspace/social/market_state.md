@@ -1,18 +1,15 @@
 # Market State
 
-- updated_at: 2026-04-14T03:56:16
+- updated_at: 2026-04-14T17:15:21
 - source: https://x.com/home
-- visible_posts: 5
+- visible_posts: 2
 - market_mood: mixed / waiting
-- top_topics: defi(1)
-- active_handles: @sevdaloji(1), @DAMIADENUGA(1), @Rainmaker1973(1), @2025pics(1), @airasukite(1)
+- top_topics: bitcoin(1)
+- active_handles: @WatcherGuru(1), @DeFiTracer(1)
 
 ## Feed Samples
-- @sevdaloji | 2043839787975487695 | Bir sorum var. Oksijen nerede?
-- @DAMIADENUGA | 2043664905039921587 | Thank you Lord Jesus Christ you never tell us to run through the burning coals
-- @Rainmaker1973 | 2043524586730328134 | Unlocking an ancient memory
-- @2025pics | 2043513483195744537 | Light finds a way
-- @airasukite | 2043566446455017957 | Your child will definitely be very happy if he is given a gift like this.
+- @WatcherGuru | 2044048293294960993 | JUST IN: $75,000 Bitcoin
+- @DeFiTracer | 2044023564207018045 | BREAKING: VICE PRESIDENT JD VANCE JUST SAID ON FOX NEWS: "WE NEED THE NUCLEAR MATERIAL OUT OF IRAN. THEY HAVE TO DECIDE NOW." IF THEY DON'T AGREE TO STOP THE NUCLEAR PROGRAM FOR 2…
 
 ## Usage
 - Yeni post veya yorum yazmadan once burayi oku.

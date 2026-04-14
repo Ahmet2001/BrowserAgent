@@ -7,6 +7,6 @@ from .base import (
     get_all_submodels
 )
 
-# Gecici sade mod: sadece browser_agent kayit edilir.
 # NOT: Bunlar base import edildikten sonra yapilmalidir.
 from . import browser_agent
+from . import sosyal_medya_agent

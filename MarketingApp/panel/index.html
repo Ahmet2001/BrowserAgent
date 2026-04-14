@@ -302,7 +302,6 @@
                                 </div>
                                 <div class="toolbar-actions">
                                     <button id="launch-browser-visible" class="btn ghost">Görünür Aç</button>
-                                    <button id="launch-browser-headless" class="btn ghost">Headless Aç</button>
                                     <button id="refresh-social" class="btn ghost">Kuyruğu Yenile</button>
                                     <button id="scan-social" class="btn primary">Aktif Sayfayı Tara</button>
                                 </div>
@@ -372,11 +371,12 @@
                             <div class="section-heading">
                                 <div>
                                     <p class="eyebrow">Heartbeat</p>
-                                    <h3>Otomasyon Config</h3>
+                                    <h3>Scheduler Dashboard</h3>
                                 </div>
                                 <div class="toolbar-actions">
                                     <button id="heartbeat-enable" class="btn ghost">Aç</button>
                                     <button id="heartbeat-disable" class="btn ghost">Kapat</button>
+                                    <button id="heartbeat-reload" class="btn ghost">Yenile</button>
                                     <button id="save-heartbeat" class="btn primary">Kaydet</button>
                                 </div>
                             </div>
@@ -386,8 +386,33 @@
                                     <strong id="heartbeat-enabled-state">Hazırlanıyor</strong>
                                     <p id="heartbeat-meta" class="micro-copy">Config okunuyor</p>
                                 </div>
+                                <div class="status-tile">
+                                    <span>Runtime</span>
+                                    <strong id="heartbeat-running-state">Hazırlanıyor</strong>
+                                    <p id="heartbeat-running-meta" class="micro-copy">Scheduler bekliyor</p>
+                                </div>
+                                <div class="status-tile">
+                                    <span>Config Sağlığı</span>
+                                    <strong id="heartbeat-config-state">Kontrol ediliyor</strong>
+                                    <p id="heartbeat-config-meta" class="micro-copy">YAML henüz doğrulanmadı</p>
+                                </div>
                             </div>
-                            <textarea id="heartbeat-editor" class="editor" placeholder="Heartbeat config yükleniyor..."></textarea>
+                            <div class="heartbeat-layout">
+                                <div class="heartbeat-editor-pane">
+                                    <p class="eyebrow">Raw Config</p>
+                                    <textarea id="heartbeat-editor" class="editor" placeholder="Heartbeat config yükleniyor..."></textarea>
+                                </div>
+                                <div class="heartbeat-jobs-pane">
+                                    <div class="section-heading section-heading-stack section-heading-compact">
+                                        <div>
+                                            <p class="eyebrow">Job Yönetimi</p>
+                                            <h3>Görevler</h3>
+                                            <p class="micro-copy">Pause, resume ve run-now işlemleri buradan yönetilir.</p>
+                                        </div>
+                                    </div>
+                                    <div id="heartbeat-job-list" class="stack-list heartbeat-job-list">Job verisi yükleniyor...</div>
+                                </div>
+                            </div>
                         </article>
                     </div>
                 </section>

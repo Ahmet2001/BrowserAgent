@@ -25,6 +25,10 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 from MarketingApp.llms import list_submodels
+from MarketingApp.enviroments.automation_runtime import (
+    release_automation,
+    try_acquire_automation,
+)
 from MarketingApp.araclar.vlm_araclari import register_bot
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -98,6 +102,21 @@ chat_histories: dict[int, list[dict]] = _load_histories()  # diskten yükle
 _base_model     = None
 _genel_araclar  = None
 _genel_arac_map = None
+
+
+def _format_automation_busy_message(snapshot: dict) -> str:
+    owner = snapshot.get("owner") or "otomasyon"
+    label = snapshot.get("label") or snapshot.get("job_id") or "aktif gorev"
+    started_at = snapshot.get("started_at") or ""
+
+    if owner == "heartbeat":
+        base = "💓 Heartbeat şu anda çalışıyor."
+    else:
+        base = "⏳ Şu anda başka bir otomasyon işlemi çalışıyor."
+
+    details = f"\nAktif görev: {label}" if label else ""
+    started = f"\nBaşlangıç: {started_at}" if started_at else ""
+    return f"{base}{details}{started}\nLütfen biraz sonra tekrar dene."
 
 
 def init_bot_env(base_model, genel_araclar, genel_arac_map):
@@ -311,17 +330,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     chat_id   = update.effective_chat.id
     register_bot(context.bot, chat_id)
+    acquired_runtime = False
 
-    add_to_history(chat_id, "user", user_text)
-
-    # Anlık metin gönderimi için yerel callback'ler
-    async def send_direct_text_cb(metin: str):
-        await _send_direct_texts(context, chat_id, [metin])
-
-    async def send_cevap_metni_cb(cevap: str):
-        await _send_cevap_metinleri(context, chat_id, [cevap])
+    acquired_runtime, snapshot = await try_acquire_automation(
+        "telegram",
+        job_id=f"telegram-text-{chat_id}",
+        label="Telegram metin istegi",
+        source="telegram",
+    )
+    if not acquired_runtime:
+        await context.bot.send_message(chat_id=chat_id, text=_format_automation_busy_message(snapshot))
+        return
 
     try:
+        add_to_history(chat_id, "user", user_text)
+
+        # Anlık metin gönderimi için yerel callback'ler
+        async def send_direct_text_cb(metin: str):
+            await _send_direct_texts(context, chat_id, [metin])
+
+        async def send_cevap_metni_cb(cevap: str):
+            await _send_cevap_metinleri(context, chat_id, [cevap])
+
         ctx = build_context(chat_id)
         audio_pcm, transcript, direct_texts, cevap_metinleri = await _base_model.text_query(
             user_text, context=ctx,
@@ -361,11 +391,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"\n❌ [TEXT HATA]: {e}")
         traceback.print_exc()
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Hata oluştu: {str(e)[:500]}")
+    finally:
+        if acquired_runtime:
+            await release_automation("telegram", job_id=f"telegram-text-{chat_id}")
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     register_bot(context.bot, chat_id)
+    acquired_runtime = False
+
+    acquired_runtime, snapshot = await try_acquire_automation(
+        "telegram",
+        job_id=f"telegram-voice-{chat_id}",
+        label="Telegram ses istegi",
+        source="telegram",
+    )
+    if not acquired_runtime:
+        await context.bot.send_message(chat_id=chat_id, text=_format_automation_busy_message(snapshot))
+        return
+
     await context.bot.send_message(chat_id=chat_id, text="🎤 Sesli mesajınız işleniyor...")
 
     try:
@@ -426,6 +471,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"\n❌ [VOICE HATA]: {e}")
         traceback.print_exc()
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Ses işleme hatası: {str(e)[:500]}")
+    finally:
+        if acquired_runtime:
+            await release_automation("telegram", job_id=f"telegram-voice-{chat_id}")
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -433,6 +481,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     register_bot(context.bot, chat_id)
     caption = update.message.caption or "Bu görseli analiz et ve ne olduğunu açıkla."
+    acquired_runtime = False
+
+    acquired_runtime, snapshot = await try_acquire_automation(
+        "telegram",
+        job_id=f"telegram-photo-{chat_id}",
+        label="Telegram gorsel istegi",
+        source="telegram",
+    )
+    if not acquired_runtime:
+        await context.bot.send_message(chat_id=chat_id, text=_format_automation_busy_message(snapshot))
+        return
 
     await context.bot.send_message(chat_id=chat_id, text="📸 Fotoğraf alındı, analiz ediliyor...")
 
@@ -489,6 +548,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         traceback.print_exc()
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Fotoğraf işleme hatası: {str(e)[:500]}")
     finally:
+        if acquired_runtime:
+            await release_automation("telegram", job_id=f"telegram-photo-{chat_id}")
         if "tmp_path" in locals() and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
