@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MimarAI Control Room</title>
+    <link rel="stylesheet" href="/panel/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="shell">
+        <aside class="sidebar">
+            <div class="brand-block">
+                <div class="brand-badge">M</div>
+                <div>
+                    <p class="eyebrow">MarketingApp</p>
+                    <h1>Mimar Control Room</h1>
+                </div>
+            </div>
+
+            <p class="sidebar-copy">
+                Ajan mimarisi, canlı operasyon akışı, bellek düzenleme ve otomasyon yönetimi için tek ekran.
+            </p>
+
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="dashboard" data-title="Komuta Merkezi">
+                    <span class="nav-icon">◉</span>
+                    <span>Komuta Merkezi</span>
+                </button>
+                <button class="nav-item" data-tab="memory" data-title="Bellek Stüdyosu">
+                    <span class="nav-icon">◌</span>
+                    <span>Bellek Stüdyosu</span>
+                </button>
+                <button class="nav-item" data-tab="workspace" data-title="Workspace Navigator">
+                    <span class="nav-icon">▣</span>
+                    <span>Workspace</span>
+                </button>
+                <button class="nav-item" data-tab="automation" data-title="Otomasyon ve Skilller">
+                    <span class="nav-icon">△</span>
+                    <span>Otomasyon</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-status card-surface">
+                <div id="sidebar-system-chip" class="status-chip offline">Offline</div>
+                <strong id="sidebar-model">Model bekleniyor</strong>
+                <span id="sidebar-uptime">Uptime bilgisi henüz yok</span>
+            </div>
+        </aside>
+
+        <div class="stage">
+            <header class="topbar">
+                <div class="topbar-copy">
+                    <p class="eyebrow">Operations Cockpit</p>
+                    <h2 id="current-tab-title">Komuta Merkezi</h2>
+                    <p id="connection-state" class="connection-state">API bağlantısı hazırlanıyor...</p>
+                </div>
+
+                <div class="topbar-actions">
+                    <label class="endpoint-control">
+                        <span>API Endpoint</span>
+                        <input id="api-base-input" type="text" placeholder="http://localhost:8001/api">
+                    </label>
+                    <button id="save-api-base" class="btn ghost">Bağlan</button>
+                    <button id="refresh-all" class="btn primary">Yenile</button>
+                </div>
+            </header>
+
+            <main class="panel-stage">
+                <section id="tab-dashboard" class="tab-panel active">
+                    <div class="hero-grid">
+                        <article class="hero-card">
+                            <div class="hero-meta">
+                                <span id="hero-system-pill" class="live-pill offline">Offline</span>
+                                <span id="last-sync-label" class="hero-sync">Henüz senkron yok</span>
+                            </div>
+                            <h3>Operasyon görünürlüğünü tek bakışta takip edin.</h3>
+                            <p>
+                                Ajan durumu, approval kuyruğu, gecikme grafiği ve canlı log akışı aynı panelden yönetilir.
+                            </p>
+
+                            <div class="hero-metrics">
+                                <div class="metric-block">
+                                    <span>Model</span>
+                                    <strong id="metric-model">-</strong>
+                                </div>
+                                <div class="metric-block">
+                                    <span>Uptime</span>
+                                    <strong id="metric-uptime">-</strong>
+                                </div>
+                                <div class="metric-block">
+                                    <span>Bekleyen Onay</span>
+                                    <strong id="metric-approvals">0</strong>
+                                </div>
+                            </div>
+                        </article>
+
+                        <article class="card-surface summary-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Sistem Özeti</p>
+                                    <h3>Nabız</h3>
+                                </div>
+                            </div>
+                            <div id="summary-grid" class="summary-grid"></div>
+                        </article>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <article class="card-surface architecture-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Architecture</p>
+                                    <h3>Ajan Hiyerarşisi</h3>
+                                </div>
+                            </div>
+
+                            <div class="architecture-board">
+                                <div class="root-cluster">
+                                    <div class="root-panel">
+                                        <div class="node-head">
+                                            <span class="node-mark">🧠</span>
+                                            <div>
+                                                <h3>BaseModel</h3>
+                                                <p>Merkez orkestratör</p>
+                                            </div>
+                                        </div>
+                                        <div id="basemodel-tools" class="tool-cloud"></div>
+                                    </div>
+                                </div>
+                                <div id="submodels-container" class="agent-grid"></div>
+                            </div>
+                        </article>
+
+                        <article class="card-surface activity-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Activity</p>
+                                    <h3>Canlı Akış</h3>
+                                </div>
+                            </div>
+                            <div id="live-activity" class="activity-stream"></div>
+                        </article>
+                    </div>
+
+                    <div class="dashboard-grid dashboard-grid-bottom">
+                        <article class="card-surface chart-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Performance</p>
+                                    <h3>Gecikme Eğrisi</h3>
+                                </div>
+                            </div>
+                            <div class="chart-wrap">
+                                <canvas id="stats-chart"></canvas>
+                            </div>
+                        </article>
+
+                        <article class="card-surface approvals-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Approvals</p>
+                                    <h3>Bekleyen Kararlar</h3>
+                                </div>
+                                <span id="approval-count-badge" class="count-badge">0</span>
+                            </div>
+                            <div id="pending-actions-list" class="stack-list empty-copy">
+                                Bekleyen aksiyon bulunmuyor.
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section id="tab-memory" class="tab-panel">
+                    <div class="memory-layout">
+                        <aside class="memory-side card-surface">
+                            <p class="eyebrow">Memory Modes</p>
+                            <div class="memory-nav">
+                                <button class="mem-nav-item active" data-mem="persona">Persona</button>
+                                <button class="mem-nav-item" data-mem="notlar">Notlar</button>
+                                <button class="mem-nav-item" data-mem="tercihler">Tercihler</button>
+                                <button class="mem-nav-item" data-mem="kisiler">Kişiler</button>
+                                <button class="mem-nav-item" data-mem="gorevler">Görevler</button>
+                                <button class="mem-nav-item" data-mem="json">Ham JSON</button>
+                            </div>
+                        </aside>
+
+                        <div class="memory-content">
+                            <article id="mem-content-persona" class="memory-pane card-surface active">
+                                <div class="section-heading">
+                                    <div>
+                                        <p class="eyebrow">Persona</p>
+                                        <h3>Rol Düzenleyici</h3>
+                                    </div>
+                                    <button id="save-persona" class="btn primary">Kaydet</button>
+                                </div>
+                                <textarea id="persona-editor" class="editor" placeholder="Persona yükleniyor..."></textarea>
+                            </article>
+
+                            <article id="mem-content-json" class="memory-pane card-surface">
+                                <div class="section-heading">
+                                    <div>
+                                        <p class="eyebrow">Raw Memory</p>
+                                        <h3>JSON Düzenleyici</h3>
+                                    </div>
+                                    <button id="save-json" class="btn primary">JSON Kaydet</button>
+                                </div>
+                                <textarea id="json-editor" class="editor" placeholder="JSON yükleniyor..."></textarea>
+                            </article>
+
+                            <article id="mem-content-list" class="memory-pane card-surface">
+                                <div class="section-heading section-heading-stack">
+                                    <div>
+                                        <p class="eyebrow">Category</p>
+                                        <h3 id="mem-list-title">Bellek Listesi</h3>
+                                    </div>
+                                    <div class="add-entry-form">
+                                        <input type="text" id="new-mem-key" placeholder="Anahtar">
+                                        <input type="text" id="new-mem-val" placeholder="Değer">
+                                        <button id="btn-add-mem" class="btn primary">Ekle</button>
+                                    </div>
+                                </div>
+                                <div class="table-shell">
+                                    <table class="mem-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Anahtar</th>
+                                                <th>Değer</th>
+                                                <th>İşlem</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="mem-table-body"></tbody>
+                                    </table>
+                                </div>
+                            </article>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="tab-workspace" class="tab-panel">
+                    <div class="workspace-toolbar card-surface">
+                        <div>
+                            <p class="eyebrow">Workspace</p>
+                            <h3>Navigator</h3>
+                        </div>
+                        <div class="toolbar-actions">
+                            <button id="btn-add-source" class="btn ghost">Kaynak Ekle</button>
+                            <button id="refresh-tree" class="btn primary">Ağacı Yenile</button>
+                        </div>
+                    </div>
+
+                    <div class="workspace-layout">
+                        <article class="card-surface tree-panel">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Tree</p>
+                                    <h3>Dosya Ağacı</h3>
+                                </div>
+                            </div>
+                            <div id="file-tree" class="tree-container"></div>
+                        </article>
+
+                        <div class="workspace-main">
+                            <article class="card-surface viewer-card">
+                                <div class="section-heading">
+                                    <div>
+                                        <p class="eyebrow">Preview</p>
+                                        <h3 id="current-file-name">Dosya Görüntüleyici</h3>
+                                        <span id="current-file-path" class="micro-copy">Henüz dosya seçilmedi</span>
+                                    </div>
+                                    <button id="btn-run-code" class="btn primary hidden">Python Çalıştır</button>
+                                </div>
+                                <pre id="file-viewer" class="code-view">Bir dosya seçin...</pre>
+                            </article>
+
+                            <article class="card-surface console-card">
+                                <div class="section-heading">
+                                    <div>
+                                        <p class="eyebrow">Console</p>
+                                        <h3>Çalıştırma Çıktısı</h3>
+                                    </div>
+                                    <button id="clear-console" class="btn ghost">Temizle</button>
+                                </div>
+                                <div id="terminal-output" class="terminal-view">
+                                    <span class="term-line prompt">&gt; Bekleniyor...</span>
+                                </div>
+                            </article>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="tab-automation" class="tab-panel">
+                    <div class="automation-grid">
+                        <article class="card-surface social-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Social Inbox</p>
+                                    <h3>X Yorum Operasyon Masası</h3>
+                                </div>
+                                <div class="toolbar-actions">
+                                    <button id="launch-browser-visible" class="btn ghost">Görünür Aç</button>
+                                    <button id="launch-browser-headless" class="btn ghost">Headless Aç</button>
+                                    <button id="refresh-social" class="btn ghost">Kuyruğu Yenile</button>
+                                    <button id="scan-social" class="btn primary">Aktif Sayfayı Tara</button>
+                                </div>
+                            </div>
+
+                            <div class="social-status-strip">
+                                <div class="status-tile">
+                                    <span>Tarayıcı</span>
+                                    <strong id="social-browser-state">Hazırlanıyor</strong>
+                                    <p id="social-browser-url" class="micro-copy">Canlı oturum bilgisi bekleniyor</p>
+                                    <p id="social-browser-mode" class="micro-copy">Mod bilgisi bekleniyor</p>
+                                </div>
+                                <div class="status-tile">
+                                    <span>Kuyruk</span>
+                                    <strong id="social-queue-count">0 yorum</strong>
+                                    <p id="social-queue-updated" class="micro-copy">Henüz tarama yapılmadı</p>
+                                </div>
+                                <div class="status-tile">
+                                    <span>Seçili Yorum</span>
+                                    <strong id="social-selected-meta">Henüz seçim yok</strong>
+                                    <a id="social-open-link" class="micro-link hidden" href="#" target="_blank" rel="noopener noreferrer">X üzerinde aç</a>
+                                </div>
+                            </div>
+
+                            <div class="social-layout">
+                                <div class="social-queue-pane">
+                                    <div class="section-heading section-heading-compact">
+                                        <div>
+                                            <p class="eyebrow">Queue</p>
+                                            <h3>Bekleyen Yorumlar</h3>
+                                        </div>
+                                    </div>
+                                    <div id="social-queue-list" class="social-queue-list empty-copy">Henüz yorum kuyruğu yok.</div>
+                                </div>
+
+                                <div class="social-editor-pane">
+                                    <div class="section-heading section-heading-stack">
+                                        <div>
+                                            <p class="eyebrow">Reply Studio</p>
+                                            <h3 id="social-editor-title">Yorum seçin</h3>
+                                            <p id="social-comment-preview" class="modal-copy">Tarayıcı açıkken ilgili X sayfasını tarayarak yorumları sıraya alabilirsiniz.</p>
+                                        </div>
+                                        <div class="toolbar-actions">
+                                            <button id="social-generate-draft" class="btn ghost">Taslak Üret</button>
+                                            <button id="social-save-draft" class="btn ghost">Taslağı Kaydet</button>
+                                            <button id="social-skip-item" class="btn ghost">Geç</button>
+                                            <button id="social-send-reply" class="btn primary">Gönder</button>
+                                        </div>
+                                    </div>
+                                    <textarea id="social-reply-editor" class="editor compact social-reply-editor" placeholder="Seçili yoruma verilecek cevap burada düzenlenir..."></textarea>
+                                </div>
+                            </div>
+                        </article>
+
+                        <article class="card-surface skills-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Runtime Modules</p>
+                                    <h3>Skill Yönetimi</h3>
+                                </div>
+                                <button id="reload-skills" class="btn ghost">Yeniden Yükle</button>
+                            </div>
+                            <div id="skills-list" class="stack-list empty-copy">Skill verisi yükleniyor...</div>
+                        </article>
+
+                        <article class="card-surface heartbeat-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Heartbeat</p>
+                                    <h3>Otomasyon Config</h3>
+                                </div>
+                                <div class="toolbar-actions">
+                                    <button id="heartbeat-enable" class="btn ghost">Aç</button>
+                                    <button id="heartbeat-disable" class="btn ghost">Kapat</button>
+                                    <button id="save-heartbeat" class="btn primary">Kaydet</button>
+                                </div>
+                            </div>
+                            <div class="social-status-strip heartbeat-status-strip">
+                                <div class="status-tile">
+                                    <span>Durum</span>
+                                    <strong id="heartbeat-enabled-state">Hazırlanıyor</strong>
+                                    <p id="heartbeat-meta" class="micro-copy">Config okunuyor</p>
+                                </div>
+                            </div>
+                            <textarea id="heartbeat-editor" class="editor" placeholder="Heartbeat config yükleniyor..."></textarea>
+                        </article>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <button id="approval-badge" class="approval-badge hidden">Onay Bekleniyor</button>
+    <div id="toast-region" class="toast-region"></div>
+
+    <div id="approval-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">Approval Required</p>
+                    <h3>İşlem Onayı</h3>
+                </div>
+            </div>
+            <p id="approval-desc" class="modal-copy">Onay bekleyen işlem açıklaması burada görünecek.</p>
+            <div class="modal-actions">
+                <button id="btn-reject" class="btn danger">Reddet</button>
+                <button id="btn-approve" class="btn primary">Onayla</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="source-modal" class="modal hidden">
+        <div class="modal-content source-modal">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">Target Intake</p>
+                    <h3>Yeni Kaynak Ekle</h3>
+                </div>
+                <button id="close-source-modal" class="icon-btn" type="button">×</button>
+            </div>
+
+            <div class="source-tabs">
+                <button class="src-tab active" data-src="file">Dosya</button>
+                <button class="src-tab" data-src="url">URL</button>
+                <button class="src-tab" data-src="text">Metin</button>
+            </div>
+
+            <div id="src-content-file" class="src-sub-content active">
+                <div id="drop-zone" class="upload-zone">
+                    <span>Dosyayı sürükleyin ya da seçin</span>
+                    <input type="file" id="file-input" hidden>
+                </div>
+                <div id="selected-file-name" class="micro-copy">Seçili dosya yok</div>
+                <button id="btn-upload" class="btn primary full-width">Yükle</button>
+            </div>
+
+            <div id="src-content-url" class="src-sub-content">
+                <input id="src-url-name" type="text" placeholder="Kaynak adı">
+                <input id="src-url-val" type="url" placeholder="https://example.com">
+                <button id="btn-add-url" class="btn primary full-width">URL Ekle</button>
+            </div>
+
+            <div id="src-content-text" class="src-sub-content">
+                <input id="src-text-name" type="text" placeholder="Kaynak adı">
+                <textarea id="src-text-val" class="editor compact" placeholder="Metni buraya ekleyin..."></textarea>
+                <button id="btn-add-text" class="btn primary full-width">Metin Ekle</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/panel/script.js"></script>
+</body>
+</html>

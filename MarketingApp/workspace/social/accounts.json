@@ -1,0 +1,12 @@
+{
+    "twitter": {
+        "username": "mock_user_x",
+        "password": "mock_password_x",
+        "url": "https://twitter.com"
+    },
+    "instagram": {
+        "username": "mock_user_ig",
+        "password": "mock_password_ig",
+        "url": "https://instagram.com"
+    }
+}

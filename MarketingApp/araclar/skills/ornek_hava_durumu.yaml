@@ -1,0 +1,6 @@
+agent: arastirma_agent
+description: Belirtilen şehir için anlık hava durumu bilgisi çeker (örnek skill)
+enabled: false
+function: hava_durumu_sorgula
+module: MarketingApp.araclar.skills.ornek_hava
+name: ornek_hava_durumu
