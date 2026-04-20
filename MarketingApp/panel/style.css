@@ -55,6 +55,7 @@ body::before {
 
 button,
 input,
+select,
 textarea {
     font: inherit;
 }
@@ -280,6 +281,9 @@ button {
 }
 
 .endpoint-control input,
+.filter-field input,
+.filter-field select,
+.toolbar-search input,
 .editor,
 .source-modal input,
 .table-shell input {
@@ -294,6 +298,9 @@ button {
 }
 
 .endpoint-control input:focus,
+.filter-field input:focus,
+.filter-field select:focus,
+.toolbar-search input:focus,
 .editor:focus,
 .source-modal input:focus,
 .editor.compact:focus {
@@ -395,10 +402,35 @@ button {
 .summary-grid,
 .modal-actions,
 .source-tabs,
+.filter-bar,
+.reply-toolbar,
 .toolbar-actions {
     display: flex;
     gap: 12px;
     flex-wrap: wrap;
+}
+
+.filter-bar {
+    align-items: end;
+    margin-bottom: 18px;
+}
+
+.filter-field,
+.toolbar-search {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.filter-grow {
+    flex: 1 1 240px;
+}
+
+.toolbar-search {
+    min-width: min(100%, 340px);
+    flex: 1 1 280px;
 }
 
 .hero-sync {
@@ -801,7 +833,7 @@ button {
 }
 
 .code-view,
-.terminal-view {
+.insight-results {
     margin: 0;
     min-height: 0;
     overflow: auto;
@@ -817,25 +849,43 @@ button {
     color: #dbeeff;
 }
 
-.terminal-view {
-    color: #c5fff9;
+.insights-grid,
+.heartbeat-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
 }
 
-.term-line {
+.file-search-field {
+    margin: 18px 0 14px;
+}
+
+.insight-results {
+    max-height: 220px;
+    padding: 14px;
+}
+
+.insight-result {
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.insight-result strong,
+.insight-result p {
+    margin: 0;
+}
+
+.insight-result strong {
     display: block;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 
-.term-line.prompt {
-    color: var(--amber);
-}
-
-.term-line.info {
-    color: #d8f8ff;
-}
-
-.term-line.error {
-    color: #ff98a7;
+.insight-result p {
+    color: var(--muted);
+    line-height: 1.55;
+    white-space: pre-wrap;
 }
 
 .automation-grid {
@@ -1056,6 +1106,36 @@ button {
 
 .social-reply-editor {
     min-height: 280px;
+}
+
+.reply-toolbar {
+    align-items: end;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.counter-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 104px;
+    min-height: 48px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    font-weight: 700;
+}
+
+.counter-pill.is-warning {
+    border-color: rgba(255, 156, 58, 0.32);
+    background: rgba(255, 156, 58, 0.12);
+}
+
+.counter-pill.is-danger {
+    border-color: rgba(255, 109, 125, 0.36);
+    background: rgba(255, 109, 125, 0.12);
 }
 
 .stack-item {
@@ -1285,7 +1365,8 @@ button {
     .topbar,
     .workspace-toolbar,
     .section-heading,
-    .stack-item {
+    .stack-item,
+    .reply-toolbar {
         flex-direction: column;
         align-items: stretch;
     }

@@ -142,6 +142,21 @@
                                     <h3>Canlı Akış</h3>
                                 </div>
                             </div>
+                            <div class="filter-bar">
+                                <label class="filter-field">
+                                    <span>Tür</span>
+                                    <select id="activity-type-filter">
+                                        <option value="all">Tümü</option>
+                                        <option value="sistem">Sistem</option>
+                                        <option value="tool">Tool</option>
+                                        <option value="submodel">Alt ajan</option>
+                                    </select>
+                                </label>
+                                <label class="filter-field filter-grow">
+                                    <span>Arama</span>
+                                    <input id="activity-search" type="search" placeholder="Log içinde ara...">
+                                </label>
+                            </div>
                             <div id="live-activity" class="activity-stream"></div>
                         </article>
                     </div>
@@ -184,7 +199,6 @@
                                 <button class="mem-nav-item" data-mem="tercihler">Tercihler</button>
                                 <button class="mem-nav-item" data-mem="kisiler">Kişiler</button>
                                 <button class="mem-nav-item" data-mem="gorevler">Görevler</button>
-                                <button class="mem-nav-item" data-mem="json">Ham JSON</button>
                             </div>
                         </aside>
 
@@ -198,17 +212,6 @@
                                     <button id="save-persona" class="btn primary">Kaydet</button>
                                 </div>
                                 <textarea id="persona-editor" class="editor" placeholder="Persona yükleniyor..."></textarea>
-                            </article>
-
-                            <article id="mem-content-json" class="memory-pane card-surface">
-                                <div class="section-heading">
-                                    <div>
-                                        <p class="eyebrow">Raw Memory</p>
-                                        <h3>JSON Düzenleyici</h3>
-                                    </div>
-                                    <button id="save-json" class="btn primary">JSON Kaydet</button>
-                                </div>
-                                <textarea id="json-editor" class="editor" placeholder="JSON yükleniyor..."></textarea>
                             </article>
 
                             <article id="mem-content-list" class="memory-pane card-surface">
@@ -246,6 +249,10 @@
                             <p class="eyebrow">Workspace</p>
                             <h3>Navigator</h3>
                         </div>
+                        <label class="toolbar-search">
+                            <span>Dosya Ara</span>
+                            <input id="workspace-search" type="search" placeholder="Dosya ya da klasör adına göre filtrele...">
+                        </label>
                         <div class="toolbar-actions">
                             <button id="btn-add-source" class="btn ghost">Kaynak Ekle</button>
                             <button id="refresh-tree" class="btn primary">Ağacı Yenile</button>
@@ -271,7 +278,7 @@
                                         <h3 id="current-file-name">Dosya Görüntüleyici</h3>
                                         <span id="current-file-path" class="micro-copy">Henüz dosya seçilmedi</span>
                                     </div>
-                                    <button id="btn-run-code" class="btn primary hidden">Python Çalıştır</button>
+                                    <button id="copy-file-path" class="btn ghost">Yolu Kopyala</button>
                                 </div>
                                 <pre id="file-viewer" class="code-view">Bir dosya seçin...</pre>
                             </article>
@@ -279,13 +286,35 @@
                             <article class="card-surface console-card">
                                 <div class="section-heading">
                                     <div>
-                                        <p class="eyebrow">Console</p>
-                                        <h3>Çalıştırma Çıktısı</h3>
+                                        <p class="eyebrow">Inspector</p>
+                                        <h3>Dosya İçgörüleri</h3>
                                     </div>
-                                    <button id="clear-console" class="btn ghost">Temizle</button>
+                                    <button id="clear-file-search" class="btn ghost">Aramayı Temizle</button>
                                 </div>
-                                <div id="terminal-output" class="terminal-view">
-                                    <span class="term-line prompt">&gt; Bekleniyor...</span>
+                                <div id="file-insights-grid" class="insights-grid">
+                                    <div class="summary-item tone-slate">
+                                        <span>Uzantı</span>
+                                        <strong id="file-stat-extension">-</strong>
+                                    </div>
+                                    <div class="summary-item tone-teal">
+                                        <span>Satır</span>
+                                        <strong id="file-stat-lines">0</strong>
+                                    </div>
+                                    <div class="summary-item tone-amber">
+                                        <span>Karakter</span>
+                                        <strong id="file-stat-chars">0</strong>
+                                    </div>
+                                    <div class="summary-item tone-rose">
+                                        <span>Kelime</span>
+                                        <strong id="file-stat-words">0</strong>
+                                    </div>
+                                </div>
+                                <label class="filter-field filter-grow file-search-field">
+                                    <span>Dosya İçinde Ara</span>
+                                    <input id="file-search-input" type="search" placeholder="Seçili dosyada metin ara...">
+                                </label>
+                                <div id="file-search-results" class="stack-list insight-results empty-copy">
+                                    Bir dosya seçtiğinizde burada satır bazlı arama sonuçları görünecek.
                                 </div>
                             </article>
                         </div>
@@ -325,6 +354,25 @@
                                     <a id="social-open-link" class="micro-link hidden" href="#" target="_blank" rel="noopener noreferrer">X üzerinde aç</a>
                                 </div>
                             </div>
+                            <div class="filter-bar filter-bar-social">
+                                <label class="filter-field">
+                                    <span>Durum</span>
+                                    <select id="social-queue-filter">
+                                        <option value="actionable">Aksiyonluk</option>
+                                        <option value="all">Tümü</option>
+                                        <option value="new">Yeni</option>
+                                        <option value="drafted">Taslak</option>
+                                        <option value="pending_verify">Doğrulanıyor</option>
+                                        <option value="sent">Gönderildi</option>
+                                        <option value="skipped">Geçildi</option>
+                                        <option value="error">Hata</option>
+                                    </select>
+                                </label>
+                                <label class="filter-field filter-grow">
+                                    <span>Arama</span>
+                                    <input id="social-queue-search" type="search" placeholder="Kullanıcı veya yorum metnine göre filtrele...">
+                                </label>
+                            </div>
 
                             <div class="social-layout">
                                 <div class="social-queue-pane">
@@ -350,6 +398,18 @@
                                             <button id="social-skip-item" class="btn ghost">Geç</button>
                                             <button id="social-send-reply" class="btn primary">Gönder</button>
                                         </div>
+                                    </div>
+                                    <div class="reply-toolbar">
+                                        <label class="filter-field">
+                                            <span>Taslak Tonu</span>
+                                            <select id="social-tone-select">
+                                                <option value="samimi, kısa ve doğal">Samimi ve doğal</option>
+                                                <option value="bilgilendirici ve net">Bilgilendirici</option>
+                                                <option value="daha enerjik ama kısa">Daha enerjik</option>
+                                                <option value="sakin, profesyonel ve kısa">Profesyonel kısa</option>
+                                            </select>
+                                        </label>
+                                        <div id="social-reply-count" class="counter-pill">0 / 240</div>
                                     </div>
                                     <textarea id="social-reply-editor" class="editor compact social-reply-editor" placeholder="Seçili yoruma verilecek cevap burada düzenlenir..."></textarea>
                                 </div>
@@ -396,6 +456,17 @@
                                     <strong id="heartbeat-config-state">Kontrol ediliyor</strong>
                                     <p id="heartbeat-config-meta" class="micro-copy">YAML henüz doğrulanmadı</p>
                                 </div>
+                            </div>
+                            <div id="heartbeat-summary-grid" class="heartbeat-summary-grid"></div>
+                            <div class="filter-bar">
+                                <label class="filter-field">
+                                    <span>Gösterim</span>
+                                    <select id="heartbeat-job-filter">
+                                        <option value="all">Tüm görevler</option>
+                                        <option value="active">Aktif / çalışan</option>
+                                        <option value="issues">Sorunlu / durdurulmuş</option>
+                                    </select>
+                                </label>
                             </div>
                             <div class="heartbeat-layout">
                                 <div class="heartbeat-editor-pane">

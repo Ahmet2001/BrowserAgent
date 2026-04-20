@@ -18,6 +18,9 @@ document.addEventListener("DOMContentLoaded", () => {
         chart: null,
         lastSyncAt: null,
         expandedDirs: new Set(),
+        activityFilter: "all",
+        activitySearch: "",
+        workspaceNodes: [],
         heartbeatDirty: false,
         heartbeat: {
             config: null,
@@ -25,11 +28,17 @@ document.addEventListener("DOMContentLoaded", () => {
             jobs: [],
         },
         pendingUploadFile: null,
+        workspaceSearch: "",
+        currentFileContent: "",
+        currentFileMeta: null,
+        heartbeatJobFilter: "all",
         social: {
             browser: null,
             queue: { items: [] },
             selectedQueueId: null,
             editorDirty: false,
+            filter: "actionable",
+            search: "",
         },
     };
 
@@ -53,6 +62,8 @@ document.addEventListener("DOMContentLoaded", () => {
         metricModel: document.getElementById("metric-model"),
         metricUptime: document.getElementById("metric-uptime"),
         metricApprovals: document.getElementById("metric-approvals"),
+        activityTypeFilter: document.getElementById("activity-type-filter"),
+        activitySearch: document.getElementById("activity-search"),
         summaryGrid: document.getElementById("summary-grid"),
         basemodelTools: document.getElementById("basemodel-tools"),
         submodelsContainer: document.getElementById("submodels-container"),
@@ -66,20 +77,24 @@ document.addEventListener("DOMContentLoaded", () => {
         btnReject: document.getElementById("btn-reject"),
         personaEditor: document.getElementById("persona-editor"),
         savePersona: document.getElementById("save-persona"),
-        jsonEditor: document.getElementById("json-editor"),
-        saveJson: document.getElementById("save-json"),
         memListTitle: document.getElementById("mem-list-title"),
         memTableBody: document.getElementById("mem-table-body"),
         newMemKey: document.getElementById("new-mem-key"),
         newMemVal: document.getElementById("new-mem-val"),
         btnAddMem: document.getElementById("btn-add-mem"),
+        workspaceSearch: document.getElementById("workspace-search"),
         fileTree: document.getElementById("file-tree"),
         currentFileName: document.getElementById("current-file-name"),
         currentFilePath: document.getElementById("current-file-path"),
         fileViewer: document.getElementById("file-viewer"),
-        btnRunCode: document.getElementById("btn-run-code"),
-        terminalOutput: document.getElementById("terminal-output"),
-        clearConsole: document.getElementById("clear-console"),
+        copyFilePath: document.getElementById("copy-file-path"),
+        fileStatExtension: document.getElementById("file-stat-extension"),
+        fileStatLines: document.getElementById("file-stat-lines"),
+        fileStatChars: document.getElementById("file-stat-chars"),
+        fileStatWords: document.getElementById("file-stat-words"),
+        fileSearchInput: document.getElementById("file-search-input"),
+        fileSearchResults: document.getElementById("file-search-results"),
+        clearFileSearch: document.getElementById("clear-file-search"),
         btnAddSource: document.getElementById("btn-add-source"),
         refreshTree: document.getElementById("refresh-tree"),
         sourceModal: document.getElementById("source-modal"),
@@ -106,10 +121,11 @@ document.addEventListener("DOMContentLoaded", () => {
         heartbeatRunningMeta: document.getElementById("heartbeat-running-meta"),
         heartbeatConfigState: document.getElementById("heartbeat-config-state"),
         heartbeatConfigMeta: document.getElementById("heartbeat-config-meta"),
+        heartbeatSummaryGrid: document.getElementById("heartbeat-summary-grid"),
+        heartbeatJobFilter: document.getElementById("heartbeat-job-filter"),
         heartbeatJobList: document.getElementById("heartbeat-job-list"),
         saveHeartbeat: document.getElementById("save-heartbeat"),
         launchBrowserVisible: document.getElementById("launch-browser-visible"),
-        launchBrowserHeadless: document.getElementById("launch-browser-headless"),
         refreshSocial: document.getElementById("refresh-social"),
         scanSocial: document.getElementById("scan-social"),
         socialBrowserState: document.getElementById("social-browser-state"),
@@ -117,11 +133,15 @@ document.addEventListener("DOMContentLoaded", () => {
         socialBrowserMode: document.getElementById("social-browser-mode"),
         socialQueueCount: document.getElementById("social-queue-count"),
         socialQueueUpdated: document.getElementById("social-queue-updated"),
+        socialQueueFilter: document.getElementById("social-queue-filter"),
+        socialQueueSearch: document.getElementById("social-queue-search"),
         socialSelectedMeta: document.getElementById("social-selected-meta"),
         socialOpenLink: document.getElementById("social-open-link"),
         socialQueueList: document.getElementById("social-queue-list"),
         socialEditorTitle: document.getElementById("social-editor-title"),
         socialCommentPreview: document.getElementById("social-comment-preview"),
+        socialToneSelect: document.getElementById("social-tone-select"),
+        socialReplyCount: document.getElementById("social-reply-count"),
         socialReplyEditor: document.getElementById("social-reply-editor"),
         socialGenerateDraft: document.getElementById("social-generate-draft"),
         socialSaveDraft: document.getElementById("social-save-draft"),
@@ -133,6 +153,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     bindEvents();
     initializePanel();
+    window.addEventListener("unhandledrejection", (event) => {
+        const reason = event.reason;
+        const message = reason?.message || String(reason || "Bilinmeyen panel hatası");
+        toast(`Panel işlemi tamamlanamadı: ${message}`, "error");
+        event.preventDefault();
+    });
 
     function resolveInitialApiBase() {
         const stored = localStorage.getItem(STORAGE_KEY);
@@ -162,6 +188,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function bindEvents() {
         dom.apiBaseInput.value = state.apiBase;
+        dom.activityTypeFilter.value = state.activityFilter;
+        dom.heartbeatJobFilter.value = state.heartbeatJobFilter;
+        dom.socialQueueFilter.value = state.social.filter;
 
         dom.navItems.forEach((item) => {
             item.addEventListener("click", () => switchTab(item.dataset.tab));
@@ -203,12 +232,27 @@ document.addEventListener("DOMContentLoaded", () => {
         dom.btnReject.addEventListener("click", () => decideAction("reject"));
 
         dom.savePersona.addEventListener("click", savePersona);
-        dom.saveJson.addEventListener("click", saveJsonMemory);
         dom.btnAddMem.addEventListener("click", addMemoryEntry);
+        dom.activityTypeFilter.addEventListener("change", () => {
+            state.activityFilter = dom.activityTypeFilter.value;
+            renderLogs(state.logs);
+        });
+        dom.activitySearch.addEventListener("input", () => {
+            state.activitySearch = dom.activitySearch.value.trim().toLowerCase();
+            renderLogs(state.logs);
+        });
 
         dom.refreshTree.addEventListener("click", fetchWorkspaceTree);
-        dom.btnRunCode.addEventListener("click", runSelectedCode);
-        dom.clearConsole.addEventListener("click", clearConsole);
+        dom.workspaceSearch.addEventListener("input", () => {
+            state.workspaceSearch = dom.workspaceSearch.value.trim().toLowerCase();
+            renderTree(state.workspaceNodes || []);
+        });
+        dom.copyFilePath.addEventListener("click", copySelectedFilePath);
+        dom.fileSearchInput.addEventListener("input", renderFileSearchResults);
+        dom.clearFileSearch.addEventListener("click", () => {
+            dom.fileSearchInput.value = "";
+            renderFileSearchResults();
+        });
 
         dom.btnAddSource.addEventListener("click", () => dom.sourceModal.classList.remove("hidden"));
         dom.closeSourceModal.addEventListener("click", () => dom.sourceModal.classList.add("hidden"));
@@ -247,6 +291,10 @@ document.addEventListener("DOMContentLoaded", () => {
         dom.heartbeatDisable.addEventListener("click", () => toggleHeartbeat(false));
         dom.heartbeatReload.addEventListener("click", reloadHeartbeatScheduler);
         dom.saveHeartbeat.addEventListener("click", saveHeartbeatConfig);
+        dom.heartbeatJobFilter.addEventListener("change", () => {
+            state.heartbeatJobFilter = dom.heartbeatJobFilter.value;
+            renderHeartbeat();
+        });
         dom.heartbeatEditor.addEventListener("input", () => {
             state.heartbeatDirty = true;
         });
@@ -261,18 +309,26 @@ document.addEventListener("DOMContentLoaded", () => {
             );
         });
         dom.launchBrowserVisible.addEventListener("click", () => launchSocialBrowser(false));
-        dom.launchBrowserHeadless?.addEventListener("click", () => launchSocialBrowser(false));
         dom.refreshSocial.addEventListener("click", async () => {
             await fetchSocialSnapshot();
             toast("Sosyal kuyruk yenilendi.", "success");
         });
         dom.scanSocial.addEventListener("click", scanSocialPage);
+        dom.socialQueueFilter.addEventListener("change", () => {
+            state.social.filter = dom.socialQueueFilter.value;
+            renderSocial({ browser: state.social.browser, queue: state.social.queue });
+        });
+        dom.socialQueueSearch.addEventListener("input", () => {
+            state.social.search = dom.socialQueueSearch.value.trim().toLowerCase();
+            renderSocial({ browser: state.social.browser, queue: state.social.queue });
+        });
         dom.socialGenerateDraft.addEventListener("click", generateSocialDraft);
         dom.socialSaveDraft.addEventListener("click", saveSocialDraft);
         dom.socialSkipItem.addEventListener("click", skipSocialItem);
         dom.socialSendReply.addEventListener("click", sendSocialReply);
         dom.socialReplyEditor.addEventListener("input", () => {
             state.social.editorDirty = true;
+            updateReplyCounter();
         });
         dom.socialQueueList.addEventListener("click", (event) => {
             const item = event.target.closest("[data-social-queue-id]");
@@ -344,6 +400,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function initializePanel() {
+        renderFileMeta();
+        renderFileSearchResults();
+        updateReplyCounter();
         try {
             await refreshActiveView({ silent: true });
         } catch (error) {
@@ -491,6 +550,10 @@ document.addEventListener("DOMContentLoaded", () => {
             setConnectionState("API cevap vermiyor.", "error");
             updateStatusChip(dom.sidebarSystemChip, "Offline", false);
             updateStatusChip(dom.heroSystemPill, "Offline", false);
+            dom.sidebarModel.textContent = "Model bilgisi yok";
+            dom.sidebarUptime.textContent = "Uptime bilgisi henüz yok";
+            dom.metricModel.textContent = "-";
+            dom.metricUptime.textContent = "-";
             return;
         }
 
@@ -614,13 +677,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderLogs(logs) {
         dom.liveActivity.innerHTML = "";
+        const query = state.activitySearch;
+        const typeFilter = state.activityFilter;
+        const filteredLogs = (logs || []).filter((log) => {
+            const matchesType = typeFilter === "all" || (log.type || "sistem") === typeFilter;
+            if (!matchesType) {
+                return false;
+            }
+            if (!query) {
+                return true;
+            }
+            return `${log.type || ""} ${log.message || ""}`.toLowerCase().includes(query);
+        });
 
-        if (!logs || logs.length === 0) {
-            dom.liveActivity.innerHTML = '<div class="empty-copy">Log akışı henüz oluşmadı.</div>';
+        if (filteredLogs.length === 0) {
+            dom.liveActivity.innerHTML = '<div class="empty-copy">Filtreye uyan log bulunamadı.</div>';
             return;
         }
 
-        logs.slice().reverse().forEach((log) => {
+        filteredLogs.slice().reverse().forEach((log) => {
             const entry = document.createElement("div");
             entry.className = `activity-entry ${log.type || "sistem"}`;
 
@@ -788,8 +863,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (memId === "persona") {
             document.getElementById("mem-content-persona").classList.add("active");
-        } else if (memId === "json") {
-            document.getElementById("mem-content-json").classList.add("active");
         } else {
             document.getElementById("mem-content-list").classList.add("active");
         }
@@ -805,11 +878,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const raw = await apiRequest("/memory/raw");
-
-        if (state.activeMemTab === "json") {
-            dom.jsonEditor.value = JSON.stringify(raw, null, 2);
-            return;
-        }
 
         renderMemoryCategory(state.activeMemTab, raw);
     }
@@ -878,27 +946,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function savePersona() {
-        await apiRequest("/persona", {
-            method: "POST",
-            body: { content: dom.personaEditor.value },
-        });
-        toast("Persona kaydedildi.", "success");
-    }
-
-    async function saveJsonMemory() {
-        let parsed;
         try {
-            parsed = JSON.parse(dom.jsonEditor.value);
+            await apiRequest("/persona", {
+                method: "POST",
+                body: { content: dom.personaEditor.value },
+            });
+            toast("Persona kaydedildi.", "success");
         } catch (error) {
-            toast("JSON biçimi geçersiz.", "error");
-            return;
+            toast(`Persona kaydedilemedi: ${error.message}`, "error");
         }
-
-        await apiRequest("/memory/raw", {
-            method: "POST",
-            body: parsed,
-        });
-        toast("Ham bellek kaydedildi.", "success");
     }
 
     async function addMemoryEntry() {
@@ -910,35 +966,55 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        await apiRequest("/memory/write", {
-            method: "POST",
-            body: { category: state.activeMemTab, key, value },
-        });
+        try {
+            await apiRequest("/memory/write", {
+                method: "POST",
+                body: { category: state.activeMemTab, key, value },
+            });
 
-        dom.newMemKey.value = "";
-        dom.newMemVal.value = "";
-        toast("Bellek kaydı eklendi.", "success");
-        await loadMemoryTab({ silent: true });
+            dom.newMemKey.value = "";
+            dom.newMemVal.value = "";
+            toast("Bellek kaydı eklendi.", "success");
+            await loadMemoryTab({ silent: true });
+        } catch (error) {
+            toast(`Bellek kaydı eklenemedi: ${error.message}`, "error");
+        }
     }
 
     async function fetchWorkspaceTree({ silent = false } = {}) {
-        const nodes = await apiRequest("/workspace/tree");
-        renderTree(nodes);
-        if (!silent) {
-            toast("Workspace ağacı yenilendi.", "success");
+        try {
+            const nodes = await apiRequest("/workspace/tree");
+            state.workspaceNodes = Array.isArray(nodes) ? nodes : [];
+            renderTree(state.workspaceNodes);
+            if (!silent) {
+                toast("Workspace ağacı yenilendi.", "success");
+            }
+        } catch (error) {
+            if (!silent) {
+                toast(`Workspace ağacı yüklenemedi: ${error.message}`, "error");
+            }
+            throw error;
         }
     }
 
     function renderTree(nodes) {
         dom.fileTree.innerHTML = "";
+        const filteredNodes = filterTreeNodes(nodes || [], state.workspaceSearch);
 
-        if (!nodes || nodes.length === 0) {
-            dom.fileTree.innerHTML = '<div class="empty-copy">Workspace boş görünüyor.</div>';
+        if (!filteredNodes || filteredNodes.length === 0) {
+            dom.fileTree.innerHTML = `<div class="empty-copy">${
+                state.workspaceSearch
+                    ? "Arama ile eşleşen dosya ya da klasör bulunamadı."
+                    : "Workspace boş görünüyor."
+            }</div>`;
             return;
         }
 
         const fragment = document.createDocumentFragment();
-        nodes.forEach((node) => fragment.appendChild(renderTreeNode(node, 0)));
+        filteredNodes
+            .slice()
+            .sort(sortTreeNodes)
+            .forEach((node) => fragment.appendChild(renderTreeNode(node, 0)));
         dom.fileTree.appendChild(fragment);
     }
 
@@ -976,7 +1052,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (expanded) {
                 const children = document.createElement("div");
                 children.className = "tree-children";
-                (node.children || []).forEach((child) => {
+                (node.children || []).slice().sort(sortTreeNodes).forEach((child) => {
                     children.appendChild(renderTreeNode(child, depth + 1));
                 });
                 wrapper.appendChild(children);
@@ -989,56 +1065,129 @@ document.addEventListener("DOMContentLoaded", () => {
     async function loadFile(path, name) {
         const data = await apiRequest(`/workspace/read?path=${encodeURIComponent(path)}`);
         state.selectedFilePath = path;
+        state.currentFileContent = data.content || "";
+        state.currentFileMeta = buildFileMeta(path, data.content || "");
         dom.currentFileName.textContent = name;
         dom.currentFilePath.textContent = path;
         dom.fileViewer.textContent = data.content || "";
-        dom.btnRunCode.classList.toggle("hidden", !name.endsWith(".py"));
+        renderFileMeta();
+        renderFileSearchResults();
         await fetchWorkspaceTree({ silent: true });
     }
 
-    function clearConsole() {
-        dom.terminalOutput.innerHTML = '<span class="term-line prompt">&gt; Bekleniyor...</span>';
+    function filterTreeNodes(nodes, query) {
+        if (!query) {
+            return nodes;
+        }
+
+        const lowered = query.toLowerCase();
+        return (nodes || [])
+            .map((node) => {
+                if (node.type === "directory") {
+                    const children = filterTreeNodes(node.children || [], lowered);
+                    if (node.name.toLowerCase().includes(lowered) || children.length > 0) {
+                        return { ...node, children };
+                    }
+                    return null;
+                }
+
+                if (`${node.name} ${node.path}`.toLowerCase().includes(lowered)) {
+                    return node;
+                }
+                return null;
+            })
+            .filter(Boolean);
     }
 
-    function addConsoleLine(text, type = "info") {
-        const line = document.createElement("span");
-        line.className = `term-line ${type}`;
-        line.textContent = text;
-        dom.terminalOutput.appendChild(line);
-        dom.terminalOutput.scrollTop = dom.terminalOutput.scrollHeight;
+    function sortTreeNodes(a, b) {
+        if (a.type !== b.type) {
+            return a.type === "directory" ? -1 : 1;
+        }
+        return String(a.name || "").localeCompare(String(b.name || ""), "tr");
     }
 
-    async function runSelectedCode() {
+    function buildFileMeta(path, content) {
+        const normalized = String(content || "");
+        const lines = normalized ? normalized.split(/\r?\n/).length : 0;
+        const words = normalized.trim() ? normalized.trim().split(/\s+/).length : 0;
+        const extension = path && path.includes(".") ? path.split(".").pop().toLowerCase() : "-";
+        return {
+            extension,
+            lines,
+            chars: normalized.length,
+            words,
+        };
+    }
+
+    function renderFileMeta() {
+        const meta = state.currentFileMeta || { extension: "-", lines: 0, chars: 0, words: 0 };
+        dom.fileStatExtension.textContent = meta.extension || "-";
+        dom.fileStatLines.textContent = `${meta.lines ?? 0}`;
+        dom.fileStatChars.textContent = `${meta.chars ?? 0}`;
+        dom.fileStatWords.textContent = `${meta.words ?? 0}`;
+    }
+
+    function renderFileSearchResults() {
+        const content = state.currentFileContent || "";
+        const query = dom.fileSearchInput.value.trim().toLowerCase();
+        dom.fileSearchResults.innerHTML = "";
+
         if (!state.selectedFilePath) {
-            toast("Önce bir Python dosyası seçin.", "warning");
+            dom.fileSearchResults.innerHTML = '<div class="empty-copy">Bir dosya seçtiğinizde burada satır bazlı arama sonuçları görünecek.</div>';
             return;
         }
 
-        addConsoleLine(`> python ${state.selectedFilePath}`, "prompt");
-        dom.btnRunCode.disabled = true;
+        if (!query) {
+            dom.fileSearchResults.innerHTML = '<div class="empty-copy">Dosyada hızlı arama için bir ifade yazın.</div>';
+            return;
+        }
+
+        const matches = content
+            .split(/\r?\n/)
+            .map((line, index) => ({ line, index: index + 1 }))
+            .filter((entry) => entry.line.toLowerCase().includes(query))
+            .slice(0, 12);
+
+        if (matches.length === 0) {
+            dom.fileSearchResults.innerHTML = '<div class="empty-copy">Arama ifadesi seçili dosyada bulunamadı.</div>';
+            return;
+        }
+
+        matches.forEach((match) => {
+            const item = document.createElement("div");
+            item.className = "insight-result";
+
+            const title = document.createElement("strong");
+            title.textContent = `Satır ${match.index}`;
+
+            const body = document.createElement("p");
+            body.textContent = match.line.trim() || "(boş satır)";
+
+            item.append(title, body);
+            dom.fileSearchResults.appendChild(item);
+        });
+    }
+
+    async function copySelectedFilePath() {
+        if (!state.selectedFilePath) {
+            toast("Önce bir dosya seçin.", "warning");
+            return;
+        }
 
         try {
-            const data = await apiRequest("/workspace/execute", {
-                method: "POST",
-                body: { filename: state.selectedFilePath },
-                timeout: 35000,
-            });
-
-            if (data.stdout) {
-                addConsoleLine(data.stdout, "info");
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(state.selectedFilePath);
+            } else {
+                const temp = document.createElement("textarea");
+                temp.value = state.selectedFilePath;
+                document.body.appendChild(temp);
+                temp.select();
+                document.execCommand("copy");
+                temp.remove();
             }
-            if (data.stderr) {
-                addConsoleLine(`STDERR: ${data.stderr}`, "error");
-            }
-            if (data.error) {
-                addConsoleLine(data.error, "error");
-            }
-            addConsoleLine(`Process exited with code ${data.exit_code ?? "-"}`, "prompt");
+            toast("Dosya yolu panoya kopyalandı.", "success");
         } catch (error) {
-            addConsoleLine(error.message, "error");
-            toast(`Kod çalıştırılamadı: ${error.message}`, "error");
-        } finally {
-            dom.btnRunCode.disabled = false;
+            toast(`Dosya yolu kopyalanamadı: ${error.message}`, "error");
         }
     }
 
@@ -1061,20 +1210,24 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        const formData = new FormData();
-        formData.append("file", file);
-        await apiRequest("/workspace/targets/upload", {
-            method: "POST",
-            body: formData,
-            timeout: 30000,
-        });
+        try {
+            const formData = new FormData();
+            formData.append("file", file);
+            await apiRequest("/workspace/targets/upload", {
+                method: "POST",
+                body: formData,
+                timeout: 30000,
+            });
 
-        dom.fileInput.value = "";
-        state.pendingUploadFile = null;
-        syncSelectedFile();
-        dom.sourceModal.classList.add("hidden");
-        toast("Dosya target klasörüne yüklendi.", "success");
-        await fetchWorkspaceTree({ silent: true });
+            dom.fileInput.value = "";
+            state.pendingUploadFile = null;
+            syncSelectedFile();
+            dom.sourceModal.classList.add("hidden");
+            toast("Dosya target klasörüne yüklendi.", "success");
+            await fetchWorkspaceTree({ silent: true });
+        } catch (error) {
+            toast(`Dosya yüklenemedi: ${error.message}`, "error");
+        }
     }
 
     async function addUrlTarget() {
@@ -1085,16 +1238,20 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        await apiRequest("/workspace/targets/add", {
-            method: "POST",
-            body: { type: "url", name, content },
-        });
+        try {
+            await apiRequest("/workspace/targets/add", {
+                method: "POST",
+                body: { type: "url", name, content },
+            });
 
-        dom.srcUrlName.value = "";
-        dom.srcUrlVal.value = "";
-        dom.sourceModal.classList.add("hidden");
-        toast("URL kaynağı eklendi.", "success");
-        await fetchWorkspaceTree({ silent: true });
+            dom.srcUrlName.value = "";
+            dom.srcUrlVal.value = "";
+            dom.sourceModal.classList.add("hidden");
+            toast("URL kaynağı eklendi.", "success");
+            await fetchWorkspaceTree({ silent: true });
+        } catch (error) {
+            toast(`URL kaynağı eklenemedi: ${error.message}`, "error");
+        }
     }
 
     async function addTextTarget() {
@@ -1105,16 +1262,20 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        await apiRequest("/workspace/targets/add", {
-            method: "POST",
-            body: { type: "text", name, content },
-        });
+        try {
+            await apiRequest("/workspace/targets/add", {
+                method: "POST",
+                body: { type: "text", name, content },
+            });
 
-        dom.srcTextName.value = "";
-        dom.srcTextVal.value = "";
-        dom.sourceModal.classList.add("hidden");
-        toast("Metin kaynağı eklendi.", "success");
-        await fetchWorkspaceTree({ silent: true });
+            dom.srcTextName.value = "";
+            dom.srcTextVal.value = "";
+            dom.sourceModal.classList.add("hidden");
+            toast("Metin kaynağı eklendi.", "success");
+            await fetchWorkspaceTree({ silent: true });
+        } catch (error) {
+            toast(`Metin kaynağı eklenemedi: ${error.message}`, "error");
+        }
     }
 
     function renderSkills(skills) {
@@ -1148,15 +1309,23 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function toggleSkill(name) {
-        await apiRequest(`/skills/${encodeURIComponent(name)}/toggle`, { method: "POST" });
-        toast(`Skill durumu güncellendi: ${name}`, "success");
-        await fetchBootstrap({ silent: true });
+        try {
+            await apiRequest(`/skills/${encodeURIComponent(name)}/toggle`, { method: "POST" });
+            toast(`Skill durumu güncellendi: ${name}`, "success");
+            await fetchBootstrap({ silent: true });
+        } catch (error) {
+            toast(`Skill güncellenemedi: ${error.message}`, "error");
+        }
     }
 
     async function reloadSkills() {
-        await apiRequest("/skills/reload", { method: "POST" });
-        toast("Skill listesi yeniden yüklendi.", "success");
-        await fetchBootstrap({ silent: true });
+        try {
+            await apiRequest("/skills/reload", { method: "POST" });
+            toast("Skill listesi yeniden yüklendi.", "success");
+            await fetchBootstrap({ silent: true });
+        } catch (error) {
+            toast(`Skill listesi yenilenemedi: ${error.message}`, "error");
+        }
     }
 
     async function fetchHeartbeatConfig() {
@@ -1179,33 +1348,44 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function saveHeartbeatConfig() {
-        await apiRequest("/heartbeat/config", {
-            method: "POST",
-            body: { content: dom.heartbeatEditor.value },
-        });
-        state.heartbeatDirty = false;
-        await fetchHeartbeatConfig();
-        toast("Heartbeat config kaydedildi.", "success");
+        try {
+            await apiRequest("/heartbeat/config", {
+                method: "POST",
+                body: { content: dom.heartbeatEditor.value },
+            });
+            state.heartbeatDirty = false;
+            await fetchHeartbeatConfig();
+            toast("Heartbeat config kaydedildi.", "success");
+        } catch (error) {
+            toast(`Heartbeat config kaydedilemedi: ${error.message}`, "error");
+        }
     }
 
     async function reloadHeartbeatScheduler() {
-        await apiRequest("/heartbeat/reload", { method: "POST" });
-        await fetchHeartbeatConfig();
-        toast("Heartbeat scheduler yenilendi.", "success");
+        try {
+            await apiRequest("/heartbeat/reload", { method: "POST" });
+            await fetchHeartbeatConfig();
+            toast("Heartbeat scheduler yenilendi.", "success");
+        } catch (error) {
+            toast(`Heartbeat yenilenemedi: ${error.message}`, "error");
+        }
     }
 
     function renderHeartbeat() {
         const config = state.heartbeat?.config || {};
         const status = state.heartbeat?.status || {};
         const jobs = Array.isArray(state.heartbeat?.jobs) ? state.heartbeat.jobs : [];
+        const filteredJobs = jobs.filter(matchesHeartbeatJobFilter);
         const enabled = Boolean(config?.enabled);
-        const interval = config?.interval_minutes ?? "-";
         const taskCount = config?.task_count ?? 0;
         const activeJobName = status?.active_job_name || status?.active_job_id || "Yok";
         const configValid = Boolean(config?.valid);
+        const runningCount = jobs.filter((job) => job.running).length;
+        const pausedCount = jobs.filter((job) => job.paused).length;
+        const issueCount = jobs.filter((job) => ["error", "paused", "disabled"].includes(job.last_status) || job.last_error).length;
 
         dom.heartbeatEnabledState.textContent = enabled ? "Aktif" : "Kapalı";
-        dom.heartbeatMeta.textContent = `${taskCount} görev • legacy ${interval} dk`;
+        dom.heartbeatMeta.textContent = `${taskCount} görev tanımı • ${status?.scheduled_job_count ?? 0} zamanlı job`;
         dom.heartbeatRunningState.textContent = status?.running
             ? `Çalışıyor • ${activeJobName}`
             : (status?.ready ? "Beklemede" : "Hazır değil");
@@ -1221,14 +1401,35 @@ document.addEventListener("DOMContentLoaded", () => {
         dom.heartbeatEnable.classList.toggle("ghost", !enabled);
         dom.heartbeatDisable.classList.toggle("primary", !enabled);
         dom.heartbeatDisable.classList.toggle("ghost", enabled);
+        dom.heartbeatSummaryGrid.innerHTML = "";
+
+        [
+            { label: "Çalışan", value: runningCount, tone: "teal" },
+            { label: "Durdurulan", value: pausedCount, tone: "amber" },
+            { label: "Sorunlu", value: issueCount, tone: "rose" },
+            { label: "Toplam", value: jobs.length, tone: "slate" },
+        ].forEach((item) => {
+            const card = document.createElement("div");
+            card.className = `summary-item tone-${item.tone}`;
+            const label = document.createElement("span");
+            label.textContent = item.label;
+            const value = document.createElement("strong");
+            value.textContent = `${item.value}`;
+            card.append(label, value);
+            dom.heartbeatSummaryGrid.appendChild(card);
+        });
 
         dom.heartbeatJobList.innerHTML = "";
-        if (jobs.length === 0) {
-            dom.heartbeatJobList.innerHTML = '<div class="empty-copy">Tanımlı heartbeat görevi yok.</div>';
+        if (filteredJobs.length === 0) {
+            dom.heartbeatJobList.innerHTML = `<div class="empty-copy">${
+                jobs.length === 0
+                    ? "Tanımlı heartbeat görevi yok."
+                    : "Seçili filtrede gösterilecek heartbeat görevi yok."
+            }</div>`;
             return;
         }
 
-        jobs.forEach((job) => {
+        filteredJobs.forEach((job) => {
             const item = document.createElement("div");
             item.className = `stack-item heartbeat-job-item status-${job.last_status || "idle"}`;
 
@@ -1267,7 +1468,7 @@ document.addEventListener("DOMContentLoaded", () => {
             toggle.className = "btn ghost";
             toggle.dataset.heartbeatAction = job.paused ? "resume" : "pause";
             toggle.dataset.heartbeatJobId = job.job_id;
-            toggle.textContent = job.paused ? "Resume" : "Pause";
+            toggle.textContent = job.paused ? "Devam Ettir" : "Duraklat";
             toggle.disabled = !job.enabled && !job.paused;
 
             const run = document.createElement("button");
@@ -1282,6 +1483,17 @@ document.addEventListener("DOMContentLoaded", () => {
             item.append(top, info, error, actions);
             dom.heartbeatJobList.appendChild(item);
         });
+    }
+
+    function matchesHeartbeatJobFilter(job) {
+        const filter = state.heartbeatJobFilter;
+        if (filter === "active") {
+            return Boolean(job.enabled) && !job.paused;
+        }
+        if (filter === "issues") {
+            return Boolean(job.paused || job.last_error || ["error", "disabled", "paused"].includes(job.last_status));
+        }
+        return true;
     }
 
     async function toggleHeartbeat(enabled) {
@@ -1335,15 +1547,22 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function fetchSocialSnapshot({ silent = false } = {}) {
-        const [browser, queue] = await Promise.all([
-            apiRequest("/social/browser/status"),
-            apiRequest("/social/x/queue"),
-        ]);
-        state.social.browser = browser || null;
-        state.social.queue = queue || { items: [] };
-        renderSocial({ browser, queue });
-        if (!silent) {
-            setConnectionState("Sosyal inbox senkronize edildi.", "success");
+        try {
+            const [browser, queue] = await Promise.all([
+                apiRequest("/social/browser/status"),
+                apiRequest("/social/x/queue"),
+            ]);
+            state.social.browser = browser || null;
+            state.social.queue = queue || { items: [] };
+            renderSocial({ browser, queue });
+            if (!silent) {
+                setConnectionState("Sosyal inbox senkronize edildi.", "success");
+            }
+        } catch (error) {
+            if (!silent) {
+                toast(`Sosyal görünüm yenilenemedi: ${error.message}`, "error");
+            }
+            throw error;
         }
     }
 
@@ -1351,7 +1570,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const browser = snapshot?.browser || state.social.browser || { ready: false, error: "Tarayıcı bağlı değil." };
         const queue = snapshot?.queue || state.social.queue || { items: [] };
         const items = Array.isArray(queue.items) ? queue.items : [];
-        const pending = items.filter((item) => item.status !== "sent" && item.status !== "skipped").length;
+        const actionableCount = items.filter(isSocialActionable).length;
+        const visibleItems = filterSocialItems(items);
 
         state.social.browser = browser;
         state.social.queue = queue;
@@ -1365,24 +1585,28 @@ document.addEventListener("DOMContentLoaded", () => {
         dom.socialBrowserMode.textContent = browser.ready
             ? `Mod: ${browser.visibility_label || (browser.headless ? "Headless" : "Görünür")}`
             : `Son tercih: ${browser.visibility_label || (browser.preferred_headless ? "Headless" : "Görünür")}`;
-        dom.socialQueueCount.textContent = `${pending} aktif • ${items.length} toplam`;
+        dom.socialQueueCount.textContent = `${actionableCount} aksiyonluk • ${visibleItems.length}/${items.length} görünür`;
         dom.socialQueueUpdated.textContent = queue.updated_at
             ? `Son güncelleme: ${formatDateTime(queue.updated_at)}`
             : "Henüz tarama yapılmadı";
         syncSocialBrowserButtons(browser);
 
-        const selectedStillExists = items.some((item) => item.queue_id === state.social.selectedQueueId);
+        const selectedStillExists = visibleItems.some((item) => item.queue_id === state.social.selectedQueueId);
         if (!selectedStillExists) {
-            const nextItem = items.find((item) => !["sent", "skipped"].includes(item.status)) || items[0] || null;
+            const nextItem = visibleItems[0] || null;
             state.social.selectedQueueId = nextItem?.queue_id || null;
             state.social.editorDirty = false;
         }
 
         dom.socialQueueList.innerHTML = "";
-        if (items.length === 0) {
-            dom.socialQueueList.innerHTML = '<div class="empty-copy">Tarama sonrası yorumlar burada görünecek.</div>';
+        if (visibleItems.length === 0) {
+            dom.socialQueueList.innerHTML = `<div class="empty-copy">${
+                items.length === 0
+                    ? "Tarama sonrası yorumlar burada görünecek."
+                    : "Filtreye uyan yorum bulunamadı."
+            }</div>`;
         } else {
-            items.forEach((item) => {
+            visibleItems.forEach((item) => {
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = `queue-item ${item.queue_id === state.social.selectedQueueId ? "is-active" : ""}`;
@@ -1420,10 +1644,11 @@ document.addEventListener("DOMContentLoaded", () => {
             dom.socialEditorTitle.textContent = "Yorum seçin";
             dom.socialCommentPreview.textContent = "Tarayıcı açıkken ilgili X sayfasını tarayarak yorumları sıraya alabilirsiniz.";
             if (!state.social.editorDirty) {
-                dom.socialReplyEditor.value = "";
+            dom.socialReplyEditor.value = "";
             }
             dom.socialReplyEditor.dataset.queueId = "";
             updateSocialComposerActions(false);
+            updateReplyCounter();
             return;
         }
 
@@ -1445,6 +1670,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         updateSocialComposerActions(true);
+        updateReplyCounter();
     }
 
     function getSelectedSocialItem() {
@@ -1453,12 +1679,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function syncSocialBrowserButtons(browser) {
-        const effectiveHeadless = Boolean(browser?.headless ?? browser?.preferred_headless);
-
-        dom.launchBrowserVisible.classList.toggle("primary", !effectiveHeadless);
-        dom.launchBrowserVisible.classList.toggle("ghost", effectiveHeadless);
-        dom.launchBrowserHeadless.classList.toggle("primary", effectiveHeadless);
-        dom.launchBrowserHeadless.classList.toggle("ghost", !effectiveHeadless);
+        dom.launchBrowserVisible.classList.toggle("primary", !browser?.ready);
+        dom.launchBrowserVisible.classList.toggle("ghost", Boolean(browser?.ready));
     }
 
     function selectSocialItem(queueId) {
@@ -1471,15 +1693,57 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateSocialComposerActions(enabled) {
+        const selected = getSelectedSocialItem();
+        const replyText = dom.socialReplyEditor.value.trim();
+        const overLimit = replyText.length > 240;
+        const sendDisabled = !enabled || !selected || !replyText || ["sent", "skipped"].includes(selected.status) || overLimit;
         [
             dom.socialGenerateDraft,
             dom.socialSaveDraft,
             dom.socialSkipItem,
-            dom.socialSendReply,
             dom.socialReplyEditor,
         ].forEach((element) => {
             element.disabled = !enabled;
         });
+        dom.socialSendReply.disabled = sendDisabled;
+    }
+
+    function isSocialActionable(item) {
+        return !["sent", "skipped"].includes(item.status);
+    }
+
+    function filterSocialItems(items) {
+        const filter = state.social.filter;
+        const query = state.social.search;
+        return items.filter((item) => {
+            if (filter === "actionable" && !isSocialActionable(item)) {
+                return false;
+            }
+            if (filter !== "all" && filter !== "actionable" && item.status !== filter) {
+                return false;
+            }
+            if (!query) {
+                return true;
+            }
+            return [
+                item.author_handle,
+                item.author_name,
+                item.text,
+                item.draft_reply,
+            ]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase()
+                .includes(query);
+        });
+    }
+
+    function updateReplyCounter() {
+        const length = dom.socialReplyEditor.value.trim().length;
+        dom.socialReplyCount.textContent = `${length} / 240`;
+        dom.socialReplyCount.classList.toggle("is-warning", length >= 220 && length <= 240);
+        dom.socialReplyCount.classList.toggle("is-danger", length > 240);
+        updateSocialComposerActions(Boolean(getSelectedSocialItem()));
     }
 
     async function scanSocialPage() {
@@ -1494,17 +1758,15 @@ document.addEventListener("DOMContentLoaded", () => {
             state.social.queue = payload.queue || state.social.queue;
             renderSocial({ browser: state.social.browser, queue: state.social.queue });
             toast(`${payload.new_items || 0} yeni yorum bulundu.`, "success");
+        } catch (error) {
+            toast(`X sayfası taranamadı: ${error.message}`, "error");
         } finally {
             dom.scanSocial.disabled = false;
         }
     }
 
-    async function launchSocialBrowser(headless) {
-        const modeLabel = "görünür";
+    async function launchSocialBrowser() {
         dom.launchBrowserVisible.disabled = true;
-        if (dom.launchBrowserHeadless) {
-            dom.launchBrowserHeadless.disabled = true;
-        }
 
         try {
             const payload = await apiRequest("/social/browser/launch", {
@@ -1517,14 +1779,11 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             state.social.browser = payload.browser || state.social.browser;
             renderSocial({ browser: state.social.browser, queue: state.social.queue });
-            toast(payload.message || `Tarayıcı ${modeLabel} modda hazır.`, "success");
+            toast(payload.message || "Tarayıcı görünür modda hazır.", "success");
         } catch (error) {
-            toast(`Tarayıcı ${modeLabel} modda başlatılamadı: ${error.message}`, "error");
+            toast(`Tarayıcı başlatılamadı: ${error.message}`, "error");
         } finally {
             dom.launchBrowserVisible.disabled = false;
-            if (dom.launchBrowserHeadless) {
-                dom.launchBrowserHeadless.disabled = false;
-            }
         }
     }
 
@@ -1539,13 +1798,15 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const payload = await apiRequest(`/social/x/queue/${encodeURIComponent(selected.queue_id)}/draft`, {
                 method: "POST",
-                body: { tone: "samimi, kısa ve doğal" },
+                body: { tone: dom.socialToneSelect.value || "samimi, kısa ve doğal" },
                 timeout: 35000,
             });
             dom.socialReplyEditor.value = payload.draft || "";
             state.social.editorDirty = false;
             await fetchSocialSnapshot({ silent: true });
             toast("Taslak üretildi.", "success");
+        } catch (error) {
+            toast(`Taslak üretilemedi: ${error.message}`, "error");
         } finally {
             dom.socialGenerateDraft.disabled = false;
         }
@@ -1558,13 +1819,17 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        await apiRequest(`/social/x/queue/${encodeURIComponent(selected.queue_id)}/update`, {
-            method: "POST",
-            body: { text: dom.socialReplyEditor.value },
-        });
-        state.social.editorDirty = false;
-        await fetchSocialSnapshot({ silent: true });
-        toast("Taslak kaydedildi.", "success");
+        try {
+            await apiRequest(`/social/x/queue/${encodeURIComponent(selected.queue_id)}/update`, {
+                method: "POST",
+                body: { text: dom.socialReplyEditor.value },
+            });
+            state.social.editorDirty = false;
+            await fetchSocialSnapshot({ silent: true });
+            toast("Taslak kaydedildi.", "success");
+        } catch (error) {
+            toast(`Taslak kaydedilemedi: ${error.message}`, "error");
+        }
     }
 
     async function skipSocialItem() {
@@ -1574,13 +1839,17 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        await apiRequest(`/social/x/queue/${encodeURIComponent(selected.queue_id)}/status`, {
-            method: "POST",
-            body: { status: "skipped", note: "Panelden gecildi" },
-        });
-        state.social.editorDirty = false;
-        await fetchSocialSnapshot({ silent: true });
-        toast("Yorum kuyruktan pas geçildi.", "success");
+        try {
+            await apiRequest(`/social/x/queue/${encodeURIComponent(selected.queue_id)}/status`, {
+                method: "POST",
+                body: { status: "skipped", note: "Panelden gecildi" },
+            });
+            state.social.editorDirty = false;
+            await fetchSocialSnapshot({ silent: true });
+            toast("Yorum kuyruktan pas geçildi.", "success");
+        } catch (error) {
+            toast(`Yorum güncellenemedi: ${error.message}`, "error");
+        }
     }
 
     async function sendSocialReply() {
@@ -1606,6 +1875,8 @@ document.addEventListener("DOMContentLoaded", () => {
             state.social.editorDirty = false;
             await fetchSocialSnapshot({ silent: true });
             toast("Yorum cevabı tarayıcı üzerinden gönderildi.", "success");
+        } catch (error) {
+            toast(`Yorum cevabı gönderilemedi: ${error.message}`, "error");
         } finally {
             dom.socialSendReply.disabled = false;
         }
@@ -1616,7 +1887,7 @@ document.addEventListener("DOMContentLoaded", () => {
             new: "Yeni",
             drafted: "Taslak",
             approved: "Onaylı",
-            pending_verify: "Dogrulaniyor",
+            pending_verify: "Doğrulanıyor",
             sent: "Gönderildi",
             skipped: "Geçildi",
             error: "Hata",
@@ -1629,13 +1900,13 @@ document.addEventListener("DOMContentLoaded", () => {
             return "Beklemede";
         }
         if (!job.enabled) {
-            return "Disabled";
+            return "Devre dışı";
         }
         if (job.running) {
             return "Çalışıyor";
         }
         if (job.paused) {
-            return "Paused";
+            return "Duraklatıldı";
         }
 
         const labels = {
@@ -1643,8 +1914,8 @@ document.addEventListener("DOMContentLoaded", () => {
             success: "Başarılı",
             skipped: "Atlandı",
             error: "Hata",
-            disabled: "Disabled",
-            paused: "Paused",
+            disabled: "Devre dışı",
+            paused: "Duraklatıldı",
             running: "Çalışıyor",
         };
         return labels[job.last_status] || "Beklemede";
@@ -1682,9 +1953,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         if (hours > 0) {
-            return `${hours}s ${minutes}dk`;
+            return `${hours}sa ${minutes}dk`;
         }
-        return `${minutes}dk`;
+        if (minutes > 0) {
+            return `${minutes}dk`;
+        }
+        return `${Math.max(0, Math.floor(seconds))}sn`;
     }
 
     function resolveAgentIcon(name) {
