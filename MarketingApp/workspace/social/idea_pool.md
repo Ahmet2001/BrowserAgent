@@ -1,7 +1,7 @@
 # Idea Pool
 
-- updated_at: 2026-04-14T17:15:21
-- source: https://x.com/home
+- updated_at: 2026-04-21T17:46:22
+- source: https://x.com/explore
 
 ## Fresh Angles
 - [fresh] bitcoin tarafinda kalabaligin neye odaklandigini tek gozlemle acikla.
