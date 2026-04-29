@@ -37,11 +37,17 @@ SYSTEM_INSTRUCTION = """
 Sen "Mimar" projesinin merkezi orkestratorusun.
 
 CALISMA KURALLARI:
-1. X (Twitter), Instagram ve YouTube ile ilgili TUM sosyal medya gorevlerini `sosyal_medya_agent` alt ajanina devret. Bu ajan post yayinlama, yorum, begeni, takip, bildirim tarama, piyasa analizi, trend kontrolu ve icerik uretimi gibi tum sosyal medya islemlerini yonetir.
-2. Basit dosya ve workspace islemlerinde (okuma, yazma, listeleme) base tool'lari dogrudan kullan.
-3. Uzun icerikleri sesli yanit gibi dusunme; metni `metinle_cevapla` veya `ekrana_yazdir` ile ilet.
-4. Karmasik gorevlerde adim adim ilerle, gereksiz ajan cagrisi yapma.
-5. Yanitlarini Turkce ver.
+1. X (Twitter), Instagram ve YouTube ile ilgili yayinlama, yorum, begeni, takip, bildirim tarama ve platform ici operasyon gorevlerini `sosyal_medya_agent` alt ajanina devret.
+2. Caption, carousel, thread, web sitesinden icerik cikarip post paketine donusturme, kreatif kampanya fikri, gorsel/video medya arama, thumbnail brief ve video storyboard gibi icerik uretim gorevlerini `content_creator_agent` alt ajanina devret.
+2b. Gorselli post, afis, kapak veya PNG istenirse `content_creator_agent` ile HTML/CSS tabanli PNG uretimi yaptir.
+2c. Reels, Shorts, TikTok, MP4 veya stok videolu sosyal medya videosu istenirse `content_creator_agent` ile MP4 video uretimi yaptir.
+3. Basit dosya ve workspace islemlerinde (okuma, yazma, listeleme) base tool'lari dogrudan kullan.
+4. Sosyal medya, icerik uretimi veya proje hafizasi gerektiren islerde once `context_paketi_oku` ile role, market_state, idea_pool ve recent_actions ozetini al.
+5. Onemli karar, dosya uretimi, post/reply denemesi veya basarili/basarisiz platform aksiyonu sonrasinda `context_aksiyon_kaydet` ile hafizaya iz dus.
+6. `role.md` persona cekirdegidir; kullanici istemedikce bastan yazma, gerekirse sadece bilerek guncelle.
+7. Uzun icerikleri sesli yanit gibi dusunme; metni `metinle_cevapla` veya `ekrana_yazdir` ile ilet.
+8. Karmasik gorevlerde adim adim ilerle, gereksiz ajan cagrisi yapma.
+9. Yanitlarini Turkce ver.
 """
 
 
@@ -70,7 +76,7 @@ class BaseModel:
         )
         self._current_image = None
 
-        _allowed = {"sosyal_medya_agent"}
+        _allowed = {"sosyal_medya_agent", "content_creator_agent"}
         if BROWSER_ARACLARI:
             _allowed.add("browser_agent")
         submodels = [sm for sm in get_all_submodels() if sm.name in _allowed]
@@ -88,12 +94,13 @@ class BaseModel:
 
         from MarketingApp.araclar import (
             ARAMA_ARACLARI,
+            CONTENT_CREATOR_ARACLARI,
             KOD_ARACLARI,
             SISTEM_ARACLARI,
             VLM_ARACLARI,
         )
 
-        all_tool_lists = [BASE_ARACLAR, SISTEM_ARACLARI, ARAMA_ARACLARI, KOD_ARACLARI, VLM_ARACLARI, BROWSER_ARACLARI]
+        all_tool_lists = [BASE_ARACLAR, SISTEM_ARACLARI, ARAMA_ARACLARI, KOD_ARACLARI, VLM_ARACLARI, CONTENT_CREATOR_ARACLARI, BROWSER_ARACLARI]
         for tool_list in all_tool_lists:
             for func in tool_list:
                 self.active_tools[func.__name__] = True
@@ -249,8 +256,21 @@ class BaseModel:
             return None
         return DEFAULT_TOOL_TIMEOUT_SECONDS
 
+    def set_agent_active(self, name: str, active: bool) -> bool:
+        if name not in self.active_agents:
+            raise KeyError(name)
+        self.active_agents[name] = bool(active)
+        state_label = "aktif" if self.active_agents[name] else "pasif"
+        self.log_message("sistem", f"Alt ajan durumu guncellendi: {name} -> {state_label}")
+        return self.active_agents[name]
+
+    def toggle_agent(self, name: str) -> bool:
+        if name not in self.active_agents:
+            raise KeyError(name)
+        return self.set_agent_active(name, not self.active_agents[name])
+
     def get_hierarchy(self) -> dict:
-        from MarketingApp.araclar import BASE_ARACLAR, BROWSER_ARACLARI
+        from MarketingApp.araclar import BASE_ARACLAR
 
         def tool_info(func_list):
             return [{
@@ -269,8 +289,11 @@ class BaseModel:
         for sm in self.submodels:
             hierarchy["submodels"].append({
                 "name": sm.name,
+                "desc": sm.description,
+                "model": sm.model_id,
                 "active": self.active_agents.get(sm.name, True),
-                "tools": tool_info(BROWSER_ARACLARI if sm.name == "browser_agent" else []),
+                "tool_count": len(sm.tools),
+                "tools": tool_info(sm.tools),
             })
 
         return hierarchy

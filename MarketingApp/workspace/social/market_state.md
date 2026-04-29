@@ -1,17 +1,18 @@
 # Market State
 
-- updated_at: 2026-04-21T17:46:22
-- source: https://x.com/explore
-- visible_posts: 4
-- market_mood: risk-off / bearish
-- top_topics: bitcoin(2)
-- active_handles: @JamilKhabir396(1), @Vivek4real_(1), @cryptofergani(1), @Bitcoin_Teddy(1)
+- updated_at: 2026-04-29T17:40:27
+- source: https://x.com/home
+- visible_posts: 5
+- market_mood: risk-on / bullish
+- top_topics: macro(3), regulation(1), solana(1)
+- active_handles: @elonmusk(1), @getphantomflow(1), @Bitcoinprof0637(1), @sunilgurjar01(1), @BitcoinPulseX(1)
 
 ## Feed Samples
-- @JamilKhabir396 | 2046573111856742600 | if you need 5M impressions+ followers Just Say "Hi" Let's follow you
-- @Vivek4real_ | 2046443307362906363 | BITCOIN IS ABOUT TO GO PARABOLIC SOON SAME SETUP. SAME CYCLE. 2012 → PARABOLIC. 2016 → PARABOLIC. 2020 → PARABOLIC. YOU KNOW WHAT COMES NEXT.
-- @cryptofergani | 2046480771272110561 | I just talked with 2 insiders at Coinbase.. The markets are about to go parabolic. DO NOT SELL YOUR COINS.
-- @Bitcoin_Teddy | 2046122443375264126 | Citibank predicts Bitcoin will reach $189,000 in 2026
+- @elonmusk | 2048833679791641057 | Scam Altman didn’t tell the OpenAI board that he OWNED the OpenAI Startup Fund. Altman lied in congressional testimony that he didn’t have financial gain from OpenAI.
+- @getphantomflow | 2048693185426149736 | RSI, MACD, EMA — hepsini denedin, hâlâ kaybediyorsun. Senin suçun değil. Bu araçlar gerçek piyasa hareketlerini takip etmek için tasarlanmadı. Phantom Flow farklı. Akıllı paranın…
+- @Bitcoinprof0637 | 2049492966511611951 | The Last Dance: Today may be Jerome Powell's last press conference as Federal Reserve Chairman. There is a 99% probability that interest rates will remain at 3.50%. This would be…
+- @sunilgurjar01 | 2049182607372353772 | $79,000 reached. The bull trap is done. Every move higher keeps getting sold. Now the next phase begins.
+- @BitcoinPulseX | 2049448290974872011 | BREAKING THE FED IS SET TO DELIVER AN EMERGENCY SPEECH TODAY AT 2:30 PM ET. REPORTS SUGGEST $5B COULD BE INJECTED INTO MARKETS IF RATE CUTS GET THE GREEN LIGHT. VOLATILITY MAY SPI…
 
 ## Usage
 - Yeni post veya yorum yazmadan once burayi oku.

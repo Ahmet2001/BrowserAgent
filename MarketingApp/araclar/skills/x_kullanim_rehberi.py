@@ -13,7 +13,7 @@ import re
 
 _COMMON_RULES = """
 ORTAK KURALLAR
-- Once yuksek seviyeli X araclarini tercih et: launch_x_browser, open_x_page, snapshot_x_feed, save_x_market_snapshot, search_x_posts, get_x_trends, inspect_x_profile, inspect_x_post, scan_x_notifications, get_x_queue, publish_x_post, publish_x_thread, reply_to_x_post, send_x_reply, like_x_post, bookmark_x_post, repost_x_post, follow_x_account, engage_with_x_post.
+- Once yuksek seviyeli X araclarini tercih et: launch_x_browser, open_x_page, snapshot_x_feed, save_x_market_snapshot, search_x_posts, get_x_trends, inspect_x_profile, inspect_x_post, scan_x_notifications, get_x_queue, publish_x_post, publish_x_post_with_media, publish_x_thread, reply_to_x_post, send_x_reply, like_x_post, bookmark_x_post, repost_x_post, follow_x_account, engage_with_x_post.
 - Generic browser araclari su anda pasif; login/session recovery disinda low-level DOM araci varsayma.
 - Post veya reply atmadan once market_state.md, idea_pool.md ve recent_actions kayitlarini okuyup tekrar kontrolu yap.
 - X uzerinde ayni niyet icin art arda iki submit deneme. Her gonderimden sonra dogrulama yap.
@@ -39,7 +39,7 @@ NEYE DIKKAT ETMELISIN
     "post": """
 POST ATMA AKISI
 1. Once son aksiyonlari kontrol et; ayni konu, ayni aci veya benzer cumle tekrar etmesin.
-2. Mumkunse publish_x_post kullan. Bu arac varken browser click/type ile post atmayi tercih etme.
+2. Gorsel varsa publish_x_post_with_media, yalniz metin varsa publish_x_post kullan. Bu araclar varken browser click/type ile post atmayi tercih etme.
 3. Cok parcali anlatim gerekiyorsa publish_x_thread kullan.
 4. Metin 240 karakteri gecmesin. Tek fikirli ve net olsun.
 5. Gonderimden sonra basarinin kanitini ara: yeni post gorunuyor mu, URL degisti mi, toast veya timeline teyidi var mi.

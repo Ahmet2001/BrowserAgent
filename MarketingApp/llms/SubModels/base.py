@@ -2,6 +2,76 @@ import json
 import inspect
 from abc import ABC, abstractmethod
 
+
+AUTO_CONTEXT_LOG_TOOLS = {
+    "save_x_market_snapshot",
+    "update_queue_item",
+    "send_x_reply",
+    "publish_x_post",
+    "publish_x_post_with_media",
+    "submit_current_x_composer",
+    "publish_x_thread",
+    "reply_to_x_post",
+    "mark_queue_item",
+    "like_x_post",
+    "bookmark_x_post",
+    "repost_x_post",
+    "quote_x_post",
+    "follow_x_account",
+    "engage_with_x_post",
+    "inspect_instagram_profile",
+    "inspect_instagram_post",
+    "like_instagram_post",
+    "follow_instagram_account",
+    "comment_instagram_post",
+    "search_youtube_videos",
+    "inspect_youtube_channel",
+    "inspect_youtube_video",
+    "like_youtube_video",
+    "subscribe_youtube_channel",
+    "website_iceriginden_post_paketi_uret",
+    "html_css_post_olustur_ve_png_kaydet",
+    "video_post_olustur_ve_mp4_kaydet",
+}
+
+
+def _compact_for_log(value, limit: int = 700) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _pick_first(mapping: dict, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = mapping.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _platform_for_tool(name: str) -> str:
+    if "_x_" in name or name.startswith(("publish_x", "reply_to_x", "send_x", "submit_current_x")):
+        return "X"
+    if "instagram" in name:
+        return "Instagram"
+    if "youtube" in name:
+        return "YouTube"
+    if name in {"html_css_post_olustur_ve_png_kaydet", "video_post_olustur_ve_mp4_kaydet", "website_iceriginden_post_paketi_uret"}:
+        return "content"
+    return "workspace"
+
+
+def _result_to_mapping(result) -> dict:
+    if isinstance(result, dict):
+        return result
+    try:
+        parsed = json.loads(result)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
 class SubModelRateLimitError(Exception):
     """
     SubModel'in çağrısı sırasında (genellikle Groq API) rate limit,
@@ -103,11 +173,49 @@ class SubModel(ABC):
             else:
                 import asyncio
                 result = await asyncio.to_thread(func, **safe_args)
-                
+
+            self._auto_log_context_action(name, safe_args, result)
             print(f"  ✅ [{self.name}] Sonuç: {str(result)[:200]}...")
             return result
         else:
             return f"[Hata]: {name} adında bir tool bulunamadı."
+
+    def _auto_log_context_action(self, tool_name: str, arguments: dict, result):
+        if tool_name not in AUTO_CONTEXT_LOG_TOOLS:
+            return
+
+        result_map = _result_to_mapping(result)
+        url = _pick_first(
+            result_map,
+            ("tweet_url", "post_url", "resolved_url", "url", "page_url", "pexels_url"),
+        ) or _pick_first(arguments, ("tweet_url", "post_url", "url"))
+        dosya = _pick_first(
+            result_map,
+            ("png_path", "mp4_path", "workspace_markdown_path", "output_path", "media_path", "file_path"),
+        ) or _pick_first(arguments, ("media_path", "dosya", "file_path"))
+        konu = _pick_first(arguments, ("konu", "topic", "query", "platform"))
+        sonuc = str(result_map.get("status") or result_map.get("result") or "completed")
+        ozet = (
+            f"{tool_name} araci calisti. "
+            f"Arguman ozeti: {_compact_for_log(arguments, 420)}. "
+            f"Sonuc ozeti: {_compact_for_log(result, 520)}"
+        )
+
+        try:
+            from MarketingApp.araclar.workspace_araclari import context_aksiyon_kaydet
+
+            context_aksiyon_kaydet(
+                ajan=self.name,
+                eylem=f"tool:{tool_name}",
+                ozet=ozet,
+                sonuc=_compact_for_log(sonuc, 80),
+                platform=_platform_for_tool(tool_name),
+                konu=_compact_for_log(konu, 160),
+                url=_compact_for_log(url, 500),
+                dosya=_compact_for_log(dosya, 500),
+            )
+        except Exception as exc:
+            print(f"  ⚠️ [{self.name}] Context auto-log atlandi: {exc}")
 
     def __repr__(self):
         tool_names = [f.__name__ for f in self.tools]

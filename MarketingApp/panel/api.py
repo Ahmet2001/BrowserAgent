@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel as PydanticBaseModel
 from typing import Optional, Dict, Any
+from dotenv import load_dotenv
 
 from MarketingApp.enviroments.automation_runtime import (
     release_automation,
@@ -36,9 +37,14 @@ _base_model = None
 PANEL_DIR = os.path.dirname(os.path.abspath(__file__))
 # Absolute path to workspace
 FILE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(FILE_DIR)
 WORKSPACE_DIR = os.path.join(FILE_DIR, "workspace")
 TARGETS_DIR = os.path.join(WORKSPACE_DIR, "targets")
 ROLE_FILE = os.path.join(WORKSPACE_DIR, "role.md")
+ENV_FILES = {
+    ".env": os.path.join(PROJECT_ROOT, ".env"),
+    ".env.local": os.path.join(PROJECT_ROOT, ".env.local"),
+}
 
 # Ensure directories exist
 os.makedirs(TARGETS_DIR, exist_ok=True)
@@ -110,9 +116,30 @@ class SocialBrowserLaunchRequest(PydanticBaseModel):
 class HeartbeatToggleRequest(PydanticBaseModel):
     enabled: bool
 
+
+class EnvFileUpdate(PydanticBaseModel):
+    target: str
+    content: str
+
 def set_base_model(bm):
     global _base_model
     _base_model = bm
+
+
+def _resolve_env_target(target: str) -> tuple[str, str]:
+    normalized = (target or "").strip()
+    if normalized not in ENV_FILES:
+        raise HTTPException(status_code=400, detail="Desteklenmeyen env dosyası")
+    return normalized, ENV_FILES[normalized]
+
+
+def _reload_runtime_env_files():
+    env_path = ENV_FILES[".env"]
+    env_local_path = ENV_FILES[".env.local"]
+    if os.path.exists(env_path):
+        load_dotenv(dotenv_path=env_path, override=True)
+    if os.path.exists(env_local_path):
+        load_dotenv(dotenv_path=env_local_path, override=True)
 
 
 def _busy_http_detail(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -302,12 +329,15 @@ async def get_panel_bootstrap():
 async def toggle_agent(name: str):
     if not _base_model or not hasattr(_base_model, 'active_agents'):
         raise HTTPException(status_code=500, detail="BaseModel not ready")
-    
-    if name in _base_model.active_agents:
-        current = _base_model.active_agents[name]
-        _base_model.active_agents[name] = not current
-        return {"name": name, "active": not current}
-    raise HTTPException(status_code=404, detail="Agent not found")
+
+    try:
+        active = _base_model.toggle_agent(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    hierarchy = _base_model.get_hierarchy()
+    agent_info = next((agent for agent in hierarchy.get("submodels", []) if agent.get("name") == name), None)
+    return {"name": name, "active": active, "agent": agent_info, "hierarchy": hierarchy}
 
 @app.post("/api/tools/{name}/toggle")
 async def toggle_tool(name: str):
@@ -319,6 +349,41 @@ async def toggle_tool(name: str):
         _base_model.active_tools[name] = not current
         return {"name": name, "active": not current}
     raise HTTPException(status_code=404, detail="Tool not found")
+
+
+@app.get("/api/env")
+async def get_env_content(target: str = ".env"):
+    normalized, path = _resolve_env_target(target)
+    content = ""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    return {
+        "target": normalized,
+        "path": path,
+        "exists": os.path.exists(path),
+        "content": content,
+        "available_targets": list(ENV_FILES.keys()),
+    }
+
+
+@app.post("/api/env")
+async def update_env_content(data: EnvFileUpdate):
+    normalized, path = _resolve_env_target(data.target)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(data.content)
+
+    _reload_runtime_env_files()
+
+    if _base_model:
+        _base_model.log_message("sistem", f"Env dosyasi guncellendi: {normalized}")
+
+    return {
+        "status": "success",
+        "target": normalized,
+        "path": path,
+        "message": f"{normalized} kaydedildi.",
+    }
 
 # --- SMART MEMORY ---
 @app.get("/api/memory/raw")

@@ -8,6 +8,7 @@ from .SubModels import SubModel, get_submodel, list_submodels, register_submodel
 
 # Boot: SubModel modullerini import ederek auto-register et.
 from .SubModels import browser_agent  # noqa: F401
+from .SubModels import content_creator_agent  # noqa: F401
 from .SubModels import sosyal_medya_agent  # noqa: F401
 
 __all__ = [

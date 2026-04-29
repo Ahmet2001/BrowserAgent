@@ -40,6 +40,11 @@ document.addEventListener("DOMContentLoaded", () => {
             filter: "actionable",
             search: "",
         },
+        env: {
+            target: ".env",
+            content: "",
+            loaded: false,
+        },
     };
 
     const dom = {
@@ -54,6 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
         apiBaseInput: document.getElementById("api-base-input"),
         saveApiBase: document.getElementById("save-api-base"),
         refreshAll: document.getElementById("refresh-all"),
+        openEnvSettings: document.getElementById("open-env-settings"),
         sidebarSystemChip: document.getElementById("sidebar-system-chip"),
         sidebarModel: document.getElementById("sidebar-model"),
         sidebarUptime: document.getElementById("sidebar-uptime"),
@@ -99,6 +105,13 @@ document.addEventListener("DOMContentLoaded", () => {
         refreshTree: document.getElementById("refresh-tree"),
         sourceModal: document.getElementById("source-modal"),
         closeSourceModal: document.getElementById("close-source-modal"),
+        envModal: document.getElementById("env-modal"),
+        closeEnvModal: document.getElementById("close-env-modal"),
+        envTargetSelect: document.getElementById("env-target-select"),
+        envFileMeta: document.getElementById("env-file-meta"),
+        envEditor: document.getElementById("env-editor"),
+        reloadEnvContent: document.getElementById("reload-env-content"),
+        saveEnvContent: document.getElementById("save-env-content"),
         fileInput: document.getElementById("file-input"),
         dropZone: document.getElementById("drop-zone"),
         selectedFileName: document.getElementById("selected-file-name"),
@@ -221,6 +234,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
 
+        dom.openEnvSettings.addEventListener("click", openEnvModal);
+        dom.closeEnvModal.addEventListener("click", closeEnvModal);
+        dom.reloadEnvContent.addEventListener("click", () => loadEnvContent(dom.envTargetSelect.value, true));
+        dom.saveEnvContent.addEventListener("click", saveEnvContent);
+        dom.envTargetSelect.addEventListener("change", () => loadEnvContent(dom.envTargetSelect.value, true));
+
         dom.approvalBadge.addEventListener("click", () => {
             const current = state.pendingActions.find((item) => item.id === state.pendingActionId) || state.pendingActions[0];
             if (current) {
@@ -259,6 +278,11 @@ document.addEventListener("DOMContentLoaded", () => {
         dom.sourceModal.addEventListener("click", (event) => {
             if (event.target === dom.sourceModal) {
                 dom.sourceModal.classList.add("hidden");
+            }
+        });
+        dom.envModal.addEventListener("click", (event) => {
+            if (event.target === dom.envModal) {
+                closeEnvModal();
             }
         });
         dom.approvalModal.addEventListener("click", (event) => {
@@ -439,6 +463,17 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    async function openEnvModal() {
+        dom.envModal.classList.remove("hidden");
+        if (!state.env.loaded) {
+            await loadEnvContent(state.env.target || dom.envTargetSelect.value || ".env", true);
+        }
+    }
+
+    function closeEnvModal() {
+        dom.envModal.classList.add("hidden");
+    }
+
     async function apiRequest(path, options = {}) {
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), options.timeout ?? 12000);
@@ -492,6 +527,46 @@ document.addEventListener("DOMContentLoaded", () => {
             throw error;
         } finally {
             window.clearTimeout(timeoutId);
+        }
+    }
+
+    async function loadEnvContent(target = ".env", showToast = false) {
+        try {
+            const payload = await apiRequest(`/env?target=${encodeURIComponent(target)}`);
+            state.env.target = payload.target || target;
+            state.env.content = payload.content || "";
+            state.env.loaded = true;
+            dom.envTargetSelect.value = state.env.target;
+            dom.envEditor.value = state.env.content;
+            dom.envFileMeta.textContent = payload.exists
+                ? `${payload.path} yüklendi`
+                : `${payload.path} henüz yok, kaydedince oluşturulacak`;
+            if (showToast) {
+                toast(`${state.env.target} yüklendi.`, "success");
+            }
+        } catch (error) {
+            dom.envFileMeta.textContent = `Env dosyası yüklenemedi: ${error.message}`;
+            toast(`Env dosyası yüklenemedi: ${error.message}`, "error");
+        }
+    }
+
+    async function saveEnvContent() {
+        try {
+            await apiRequest("/env", {
+                method: "POST",
+                body: JSON.stringify({
+                    target: dom.envTargetSelect.value,
+                    content: dom.envEditor.value,
+                }),
+            });
+            state.env.target = dom.envTargetSelect.value;
+            state.env.content = dom.envEditor.value;
+            state.env.loaded = true;
+            toast(`${state.env.target} kaydedildi.`, "success");
+            await fetchBootstrap({ silent: true });
+            await loadEnvContent(state.env.target, false);
+        } catch (error) {
+            toast(`Env kaydedilemedi: ${error.message}`, "error");
         }
     }
 
@@ -624,8 +699,19 @@ document.addEventListener("DOMContentLoaded", () => {
             const title = document.createElement("h4");
             title.textContent = agent.name;
             const subtitle = document.createElement("p");
-            subtitle.textContent = agent.active ? "Aktif durumda" : "Şu anda pasif";
+            const parts = [agent.active ? "Aktif durumda" : "Şu anda pasif"];
+            if (agent.model) {
+                parts.push(agent.model);
+            }
+            if (typeof agent.tool_count === "number") {
+                parts.push(`${agent.tool_count} tool`);
+            }
+            subtitle.textContent = parts.join(" • ");
             textWrap.append(title, subtitle);
+
+            if (agent.desc) {
+                textWrap.title = agent.desc;
+            }
 
             const toggle = document.createElement("button");
             toggle.className = `toggle-pill ${agent.active ? "is-active" : ""}`;
@@ -1964,6 +2050,9 @@ document.addEventListener("DOMContentLoaded", () => {
     function resolveAgentIcon(name) {
         if (name.includes("browser")) {
             return "🌐";
+        }
+        if (name.includes("content")) {
+            return "🎨";
         }
         if (name.includes("vlm")) {
             return "📸";

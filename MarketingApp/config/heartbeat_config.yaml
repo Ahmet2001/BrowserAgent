@@ -1,6 +1,6 @@
 ## Heartbeat - Crypto X automation
 
-enabled: true
+enabled: false
 interval_minutes: 1
 
 post_gorevi: &post_gorevi >

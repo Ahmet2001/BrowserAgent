@@ -121,6 +121,34 @@ _X_SUBMIT_SELECTORS = (
     "[data-testid='tweetButtonInline']",
     "[data-testid='tweetButton']",
 )
+_X_SUBMIT_TEXT_MARKERS = (
+    "post",
+    "tweet",
+    "reply",
+    "send",
+    "gonder",
+    "gönder",
+    "yanitla",
+    "yanıtla",
+    "paylas",
+    "paylaş",
+)
+_X_SUBMIT_EXCLUDE_MARKERS = (
+    "schedule",
+    "schedule post",
+    "scheduled",
+    "calendar",
+    "takvim",
+    "zamanla",
+    "planla",
+    "taslak",
+    "draft",
+)
+_X_MEDIA_INPUT_SELECTORS = (
+    "input[data-testid='fileInput']",
+    "input[type='file'][accept*='image']",
+    "input[type='file']",
+)
 _X_QUOTE_MARKERS = ("quote", "quote post", "post with quote", "alıntı", "alıntıyla", "alıntıla")
 _X_FOLLOW_MARKERS = ("follow", "takip et")
 _X_UNFOLLOW_MARKERS = ("following", "takip ediliyor", "takiptesin", "unfollow")
@@ -483,7 +511,7 @@ def _build_x_destination_url(
     tweet_url: str = "",
     tab: str = "latest",
 ) -> str:
-    target = (destination or "home").strip().lower()
+    target = _normalize_compact(destination or "home")
     if target in {"home", "anasayfa"}:
         return "https://x.com/home"
     if target in {"explore", "kesfet"}:
@@ -494,10 +522,12 @@ def _build_x_destination_url(
         return "https://x.com/notifications/mentions"
     if target in {"bookmarks", "yer_isaretleri"}:
         return "https://x.com/i/bookmarks"
-    if target in {"compose", "yaz"}:
+    if target in {"compose", "yaz", "new post", "yeni post", "post at", "tweet at", "gonder", "gönder", "paylas", "paylaş"}:
         return "https://x.com/compose/post"
     if target in {"post", "tweet", "status"}:
-        return _normalize_x_status_url(tweet_url)
+        return _normalize_x_status_url(tweet_url) if tweet_url else "https://x.com/compose/post"
+    if not tweet_url and any(marker in target for marker in ("post", "tweet", "gonder", "gönder", "paylas", "paylaş")):
+        return "https://x.com/compose/post"
     if target in {"profile", "profil"}:
         handle = _normalize_x_handle(handle_or_url)
         return f"https://x.com/{handle}" if handle else ""
@@ -829,6 +859,16 @@ def _assess_submission_snapshot(snapshot: dict[str, Any], message: str) -> dict[
             "evidence": ["login_wall"],
             "warning": "",
             "error": "X oturumu login duvarina dustu.",
+        }
+
+    if "/compose/post/schedule" in (snapshot.get("page_url", "") or ""):
+        return {
+            "attempted": True,
+            "verified": False,
+            "verification_state": "error",
+            "evidence": ["schedule_screen"],
+            "warning": "",
+            "error": "Post yerine X schedule ekrani acildi; otomasyon tekrar Post butonunu hedeflemeli.",
         }
 
     matched_alert = next(
@@ -1501,7 +1541,19 @@ def _locate_x_composer(driver):
 def _locate_x_submit(driver, require_enabled: bool = True):
     js = """
     const selectors = arguments[0] || [];
-    const requireEnabled = !!arguments[1];
+    const markers = (arguments[1] || []).map((item) => String(item || '').toLowerCase());
+    const excludeMarkers = (arguments[2] || []).map((item) => String(item || '').toLowerCase());
+    const requireEnabled = !!arguments[3];
+    const normalize = (value) => (value || '')
+      .toLowerCase()
+      .replace(/[ı]/g, 'i')
+      .replace(/[ğ]/g, 'g')
+      .replace(/[ü]/g, 'u')
+      .replace(/[ş]/g, 's')
+      .replace(/[ö]/g, 'o')
+      .replace(/[ç]/g, 'c')
+      .replace(/\\s+/g, ' ')
+      .trim();
     const isVisible = (el) => {
       if (!el) return false;
       const rect = el.getBoundingClientRect();
@@ -1512,17 +1564,126 @@ def _locate_x_submit(driver, require_enabled: bool = True):
       const disabled = el.disabled === true || el.getAttribute('disabled') !== null || el.getAttribute('aria-disabled') === 'true';
       return !disabled;
     };
+    const textFor = (el) => {
+      const childLabels = [...el.querySelectorAll('[aria-label], [title]')]
+        .map((node) => node.getAttribute('aria-label') || node.getAttribute('title') || '')
+        .filter(Boolean)
+        .join(' ');
+      return normalize([el.innerText, el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), childLabels].filter(Boolean).join(' '));
+    };
+    const isExcluded = (text) => excludeMarkers.some((marker) => marker && text.includes(normalize(marker)));
+    const markerScore = (text) => {
+      let best = 999;
+      for (const markerRaw of markers) {
+        const marker = normalize(markerRaw);
+        if (!marker) continue;
+        if (text === marker) best = Math.min(best, 0);
+        else if (text.startsWith(marker + ' ') || text.endsWith(' ' + marker)) best = Math.min(best, 1);
+        else if (text.includes(marker)) best = Math.min(best, 2);
+      }
+      return best;
+    };
 
     for (const selector of selectors) {
       for (const el of document.querySelectorAll(selector)) {
         if (!isVisible(el)) continue;
         if (requireEnabled && !isEnabled(el)) continue;
+        const text = textFor(el);
+        if (isExcluded(text)) continue;
         return el;
+      }
+    }
+
+    const candidates = [...document.querySelectorAll("button, div[role='button'], [role='button']")]
+      .filter((el) => isVisible(el) && (!requireEnabled || isEnabled(el)))
+      .map((el) => ({el, text: textFor(el), rect: el.getBoundingClientRect()}))
+      .filter((item) => {
+        if (!item.text) return false;
+        if (isExcluded(item.text)) return false;
+        return markerScore(item.text) < 999;
+      })
+      .sort((a, b) => {
+        const scoreDelta = markerScore(a.text) - markerScore(b.text);
+        if (scoreDelta !== 0) return scoreDelta;
+        const bottomDelta = b.rect.bottom - a.rect.bottom;
+        if (Math.abs(bottomDelta) > 4) return bottomDelta;
+        return b.rect.right - a.rect.right;
+      });
+
+    return candidates.length ? candidates[0].el : null;
+    """
+    return driver.execute_script(
+        js,
+        list(_X_SUBMIT_SELECTORS),
+        list(_X_SUBMIT_TEXT_MARKERS),
+        list(_X_SUBMIT_EXCLUDE_MARKERS),
+        require_enabled,
+    )
+
+
+def _locate_x_media_input(driver):
+    js = """
+    const selectors = arguments[0] || [];
+    for (const selector of selectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (el && (el.tagName || '').toLowerCase() === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'file') {
+          return el;
+        }
       }
     }
     return null;
     """
-    return driver.execute_script(js, list(_X_SUBMIT_SELECTORS), require_enabled)
+    return driver.execute_script(js, list(_X_MEDIA_INPUT_SELECTORS))
+
+
+def _close_x_schedule_if_open(driver) -> bool:
+    current_url = getattr(driver, "current_url", "") or ""
+    if "/compose/post/schedule" not in current_url:
+        return False
+
+    closed = False
+    try:
+        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+        time.sleep(0.4)
+        closed = "/compose/post/schedule" not in (getattr(driver, "current_url", "") or "")
+    except Exception:
+        closed = False
+
+    if not closed:
+        try:
+            close_button = driver.execute_script(
+                """
+                const normalize = (value) => (value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                const isVisible = (el) => {
+                  if (!el) return false;
+                  const rect = el.getBoundingClientRect();
+                  const style = window.getComputedStyle(el);
+                  return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                };
+                const candidates = [...document.querySelectorAll("button, div[role='button'], [role='button']")];
+                return candidates.find((el) => {
+                  if (!isVisible(el)) return false;
+                  const text = normalize([el.innerText, el.textContent, el.getAttribute('aria-label'), el.getAttribute('title')].filter(Boolean).join(' '));
+                  return text === 'close' || text === 'kapat' || text === 'back' || text === 'geri';
+                }) || null;
+                """
+            )
+            if close_button is not None:
+                _human_click(driver, close_button)
+                time.sleep(0.5)
+                closed = "/compose/post/schedule" not in (getattr(driver, "current_url", "") or "")
+        except Exception:
+            closed = False
+
+    if not closed:
+        try:
+            driver.back()
+            time.sleep(0.8)
+            closed = "/compose/post/schedule" not in (getattr(driver, "current_url", "") or "")
+        except Exception:
+            closed = False
+
+    return closed
 
 
 def _type_into_x_composer(message: str):
@@ -1588,10 +1749,44 @@ def _type_into_x_composer(message: str):
     return composer, method
 
 
+def _attach_media_to_x_composer(media_path: str) -> dict[str, Any]:
+    driver = _get_driver()
+    abs_path = os.path.abspath(str(media_path or "").strip())
+    if not abs_path:
+        raise ValueError("Medya dosya yolu boş olamaz")
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"Medya dosyası bulunamadı: {abs_path}")
+
+    wait = WebDriverWait(driver, 15)
+    media_input = wait.until(lambda current_driver: _locate_x_media_input(current_driver))
+    media_input.send_keys(abs_path)
+
+    def _media_selected(current_driver):
+        input_el = _locate_x_media_input(current_driver)
+        if input_el is None:
+            return False
+        value = (input_el.get_attribute("value") or "").strip()
+        return bool(value)
+
+    wait.until(_media_selected)
+    time.sleep(2.0)
+
+    return {
+        "media_path": abs_path,
+        "media_name": os.path.basename(abs_path),
+    }
+
+
 def _submit_x_composer():
     driver = _get_driver()
+    _close_x_schedule_if_open(driver)
     wait = WebDriverWait(driver, 12)
     submit = wait.until(lambda current_driver: _locate_x_submit(current_driver, require_enabled=True))
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",
+        submit,
+    )
+    time.sleep(0.2)
 
     submit_method = ""
     last_error = None
@@ -1599,12 +1794,46 @@ def _submit_x_composer():
         ("human_click", lambda: _human_click(driver, submit)),
         ("native_click", lambda: submit.click()),
         ("js_click", lambda: driver.execute_script("arguments[0].click();", submit)),
+        (
+            "pointer_mouse_js",
+            lambda: driver.execute_script(
+                """
+                const el = arguments[0];
+                el.focus && el.focus();
+                for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+                  const EventCtor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+                  el.dispatchEvent(new EventCtor(type, {bubbles: true, cancelable: true, view: window, pointerId: 1, button: 0}));
+                }
+                """,
+                submit,
+            ),
+        ),
     )
     for name, strategy in click_strategies:
         try:
             strategy()
-            submit_method = name
-            break
+            time.sleep(0.8)
+            if "/compose/post/schedule" in (getattr(driver, "current_url", "") or ""):
+                _close_x_schedule_if_open(driver)
+                last_error = RuntimeError(f"{name} schedule ekranini acti; Post butonu degil schedule hedefi tiklanmis olabilir.")
+                submit = wait.until(lambda current_driver: _locate_x_submit(current_driver, require_enabled=True))
+                continue
+            status_or_alert = driver.execute_script(
+                """
+                const alerts = [...document.querySelectorAll('[role="alert"], [aria-live="assertive"], [data-testid*="toast"]')]
+                  .map((el) => (el.innerText || el.textContent || '').trim())
+                  .filter(Boolean);
+                const url = window.location.href || '';
+                return /\\/status\\/\\d+/.test(url) || alerts.length > 0;
+                """
+            )
+            composer_after_click = _locate_x_composer(driver)
+            submit_after_click = _locate_x_submit(driver, require_enabled=True)
+            took_effect = bool(status_or_alert or composer_after_click is None or submit_after_click is None)
+            if took_effect:
+                submit_method = name
+                break
+            last_error = RuntimeError(f"{name} tıklaması DOM'da gönderim etkisi oluşturmadı.")
         except Exception as exc:
             last_error = exc
 
@@ -1621,6 +1850,7 @@ def _submit_x_composer():
         raise last_error or RuntimeError("X gonder butonuna basılamadı.")
 
     time.sleep(1.2)
+    _close_x_schedule_if_open(driver)
     return {
         "url": driver.current_url,
         "title": driver.title,
@@ -1674,6 +1904,69 @@ def publish_x_post(text: str) -> dict[str, Any]:
         "length": len(message),
         "text": message,
         "type_method": type_method,
+        "resolved_tweet_url": resolved_tweet_url,
+        **verification,
+        **result,
+    }
+
+
+def publish_x_post_with_media(text: str, media_path: str) -> dict[str, Any]:
+    """
+    X üzerinde görselli yeni bir post yayınlar.
+
+    Args:
+        text: Yayınlanacak metin. 240 karakteri geçmemesi önerilir.
+        media_path: Yüklenecek görselin yerel dosya yolu.
+    """
+    message = (text or "").strip()
+    if not message:
+        raise ValueError("Post metni boş olamaz")
+    if len(message) > 240:
+        raise ValueError("Post metni 240 karakteri geçemez")
+
+    driver = _get_driver()
+    driver.get("https://x.com/compose/post")
+    _composer, type_method = _type_into_x_composer(message)
+    media_result = _attach_media_to_x_composer(media_path)
+    result = _submit_x_composer()
+    verification = _verify_x_submission(message)
+    resolved_tweet_url = _resolve_recent_status_url(driver, message) if verification.get("verified") else ""
+    return {
+        "status": "posted" if verification["verified"] else verification["verification_state"],
+        "length": len(message),
+        "text": message,
+        "type_method": type_method,
+        "resolved_tweet_url": resolved_tweet_url,
+        **media_result,
+        **verification,
+        **result,
+    }
+
+
+def submit_current_x_composer() -> dict[str, Any]:
+    """
+    X'te halihazırda açık olan compose/draft ekranındaki aktif Post/Reply butonuna basar.
+    Metin ve medya zaten eklenmiş ama otomasyon son tuşa basamamışsa kurtarma aracı olarak kullan.
+    """
+    driver = _get_driver()
+    composer = _locate_x_composer(driver)
+    if composer is None:
+        raise RuntimeError("Açık X composer alanı bulunamadı.")
+
+    message = (_read_element_value(driver, composer) or "").strip()
+    result = _submit_x_composer()
+    verification = _verify_x_submission(message) if message else {
+        "attempted": True,
+        "verified": False,
+        "verification_state": "pending_verify",
+        "evidence": ["empty_or_unreadable_composer_text"],
+        "warning": "Composer metni okunamadığı için doğrulama sınırlı.",
+    }
+    resolved_tweet_url = _resolve_recent_status_url(driver, message) if message and verification.get("verified") else ""
+    return {
+        "status": "posted" if verification.get("verified") else verification.get("verification_state", "pending_verify"),
+        "text": message,
+        "length": len(message),
         "resolved_tweet_url": resolved_tweet_url,
         **verification,
         **result,

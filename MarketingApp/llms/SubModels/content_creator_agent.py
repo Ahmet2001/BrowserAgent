@@ -1,9 +1,5 @@
 """
-Sosyal Medya Agent SubModel — X (Twitter), Instagram ve YouTube otomasyon uzmani.
-
-OpenAI-compatible endpoint uzerinde tool-calling ile calisir.
-Tum sosyal medya gorevlerini (post yayinlama, yorum, begeni, takip,
-bildirim tarama, piyasa analizi vb.) tek merkezden yonetir.
+Content Creator Agent SubModel — medya arama, brief ve içerik üretim uzmanı.
 """
 
 from __future__ import annotations
@@ -14,7 +10,7 @@ import re
 from openai import AsyncOpenAI
 
 from .base import SubModel, SubModelRateLimitError, register_submodel
-from MarketingApp.araclar import SOSYAL_MEDYA_ARACLARI
+from MarketingApp.araclar import CONTENT_CREATOR_ARACLARI
 from MarketingApp.llms.runtime_config import (
     get_base_model_name,
     get_base_reasoning_effort,
@@ -24,8 +20,8 @@ from MarketingApp.llms.runtime_config import (
 )
 
 
-class SosyalMedyaAgentSubModel(SubModel):
-    """X (Twitter), Instagram ve YouTube uzerinde icerik uretimi, etkilesim ve analiz uzmani."""
+class ContentCreatorAgentSubModel(SubModel):
+    """Caption, kreatif brief, görsel/video medya arama ve içerik paketleme uzmanı."""
 
     def __init__(self):
         api_key = get_model_api_key()
@@ -34,18 +30,21 @@ class SosyalMedyaAgentSubModel(SubModel):
         if not api_key:
             print(f"⚠️  UYARI: {self.provider_name} API anahtari bulunamadi!")
 
-        super(SosyalMedyaAgentSubModel, self).__init__(
-            name="sosyal_medya_agent",
+        super(ContentCreatorAgentSubModel, self).__init__(
+            name="content_creator_agent",
             description=(
-                "X (Twitter), Instagram ve YouTube uzerinde sosyal medya otomasyon uzmani. "
-                "Post yayinlama, thread olusturma, yorum yapma, begeni/takip, bildirim tarama, "
-                "piyasa snapshot'i alma, trend analizi, profil/post inceleme gibi tum sosyal medya "
-                "gorevleri icin bu ajani kullan. Kripto, DeFi, NFT, blockchain icerik uretimi "
-                "ve topluluk yonetimi konularinda uzmandir."
+                "Icerik uretim ve medya arama uzmani. Caption, thread, carousel akisi, "
+                "kreatif kampanya fikri, thumbnail brief'i, video storyboard'i, Pexels "
+                "uzerinden stok fotograf/video arama, verilen web sitesinden icerik cikarip "
+                "post paketine donusturme, HTML/CSS ile PNG post uretme ve stok videolu MP4 "
+                "sosyal medya videosu olusturma "
+                "gorevleri icin bu ajani kullan. Platformda paylasim yapmaz; uygun medya "
+                "seceneklerini, kaynak linklerini, PNG/MP4 dosya yolunu ve kullanilabilir "
+                "icerik metinlerini hazirlar."
             ),
             model_id=get_base_model_name(),
             api_key=api_key,
-            tools=SOSYAL_MEDYA_ARACLARI,
+            tools=CONTENT_CREATOR_ARACLARI,
         )
         self._client = AsyncOpenAI(
             api_key=self.api_key,
@@ -53,9 +52,7 @@ class SosyalMedyaAgentSubModel(SubModel):
         )
 
     def _strip_thought_blocks(self, text: str) -> str:
-        return re.sub(
-            r"<thought>.*?</thought>", "", text or "", flags=re.DOTALL | re.IGNORECASE
-        ).strip()
+        return re.sub(r"<thought>.*?</thought>", "", text or "", flags=re.DOTALL | re.IGNORECASE).strip()
 
     def _extract_message_text(self, message) -> str:
         content = getattr(message, "content", "")
@@ -70,10 +67,7 @@ class SosyalMedyaAgentSubModel(SubModel):
                     maybe_text = getattr(item, "text", None)
                     if maybe_text:
                         texts.append(maybe_text)
-            combined = "\n".join(
-                part.strip() for part in texts if part and part.strip()
-            ).strip()
-            return self._strip_thought_blocks(combined)
+            return self._strip_thought_blocks("\n".join(part.strip() for part in texts if part and part.strip()))
         return ""
 
     def _assistant_message_payload(self, message) -> dict:
@@ -96,16 +90,9 @@ class SosyalMedyaAgentSubModel(SubModel):
                         "arguments": call.function.arguments or "{}",
                     },
                 }
-
             function_payload = call_payload.get("function") or {}
-            function_payload["name"] = (
-                function_payload.get("name") or call.function.name
-            )
-            function_payload["arguments"] = (
-                function_payload.get("arguments")
-                or call.function.arguments
-                or "{}"
-            )
+            function_payload["name"] = function_payload.get("name") or call.function.name
+            function_payload["arguments"] = function_payload.get("arguments") or call.function.arguments or "{}"
             call_payload["function"] = function_payload
             call_payload["id"] = call_payload.get("id") or call.id
             call_payload["type"] = call_payload.get("type") or "function"
@@ -125,37 +112,38 @@ class SosyalMedyaAgentSubModel(SubModel):
             return {}
 
     async def run(self, gorev: str) -> str:
-        print(f"\n📱 [{self.name}] Sosyal medya gorevi baslatiliyor: {gorev[:120]}...")
+        print(f"\n🎨 [{self.name}] Icerik uretim gorevi baslatiliyor: {gorev[:120]}...")
 
         from MarketingApp.araclar import rol_oku
 
         aktif_rol = rol_oku()
-
         system_prompt = (
-            "Sen bir sosyal medya otomasyon uzmansin. X (Twitter), Instagram ve YouTube "
-            "platformlarinda icerik uretimi, etkilesim ve analiz gorevlerini yonetirsin.\n\n"
+            "Sen yaratıcı bir content creator ajansın. Görevin; verilen brief'ten yüksek kaliteli "
+            "içerik fikirleri, metinler ve medya seçenekleri çıkarmaktır.\n\n"
             "CALISMA PRENSIPLERI:\n"
-            "1. Once gorev tanimimdaki tum talimatlari dikkatlice oku.\n"
-            "2. Gerekli bilgileri toplamak icin uygun araclari kullan "
-            "(snapshot_x_feed, get_x_queue, scan_x_notifications vb.).\n"
-            "2b. Karar vermeden once `context_paketi_oku` ile persona, market_state, idea_pool ve son aksiyon ozetini oku; tum workspace'i modele yigma.\n"
-            "3. Icerik uretirken:\n"
-            "   - Her post/yorum tek bir ana fikir tasisin.\n"
-            "   - Maksimum 240 karakter sinirini asma.\n"
-            "   - Ayni kalibi veya aciyi tekrarlama.\n"
-            "   - Spam, manipulatif dil veya bos icerik uretme.\n"
-            "4. Aksiyon adimlarini sirayla yap; once durumu oku, sonra karar ver, sonra uygula.\n"
-            "5. Her basarili veya basarisiz aksiyondan sonra `context_aksiyon_kaydet` ile "
-            "social/automation_log.md ve social/recent_actions.md dosyalarina standart kayit dus.\n"
-            "6. Basarisiz bir islem olursa hata mesajini raporla, gereksiz tekrarlardan kacin.\n"
-            "7. X tarayicisi acik degilse once `launch_x_browser()` veya `launch_social_browser()` cagir.\n"
-            "8. Tarayici durumunu `get_browser_status()` ile kontrol edebilirsin.\n"
-            "9. Elinde yerel bir PNG/JPG dosya yolu varsa ve gorselli post isteniyorsa `publish_x_post_with_media` aracini tercih et; sadece metin paylasma.\n"
-            "10. Composer ekrani hazir ama son Post/Reply tusuna basamadiysan `submit_current_x_composer` kurtarma aracini kullan.\n"
-            "11. X'te gorselli post attiysan final yaniyta media dosya yolunu ve cozulen tweet URL'sini yaz.\n"
-            "12. Gorev tamamlandiginda kisa ve net bir Turkce ozet ver.\n"
+            "1. Platform aksiyonu yapma, paylaşım yapma veya kullanıcı adına yayınlama. Yalnızca üret, ara ve raporla.\n"
+            "2. Kullanıcı URL verirse veya web sitesinden içerik çıkarma isterse önce `website_icerik_cikar` kullan.\n"
+            "2b. Web sitesini doğrudan sosyal medya içeriğine çevirmek gerekirse `website_iceriginden_post_paketi_uret` kullan.\n"
+            "3. Görsel veya video stok medya gerekiyorsa Pexels araçlarını kullan.\n"
+            "4. Fotoğraf araması için `pexels_fotograf_ara`, seçkiler için `pexels_curated_fotograflar`, "
+            "tekil detay için `pexels_fotograf_detay` kullan.\n"
+            "5. Video araması için `pexels_video_ara`, popüler videolar için `pexels_populer_videolar` kullan.\n"
+            "6. Kullanıcı Reels, Shorts, TikTok, stok videolu video veya MP4 çıktı isterse "
+            "`video_post_olustur_ve_mp4_kaydet` aracını kullan.\n"
+            "7. Kullanıcı görselli post, afiş, kapak, X/Instagram/LinkedIn postu veya PNG çıktı isterse "
+            "`html_css_post_olustur_ve_png_kaydet` aracını kullan; sadece metin veya plan yazmakla yetinme.\n"
+            "8. HTML/CSS post veya MP4 üretirken başlık, alt başlık, CTA, platform, boyut, renk ve stok medya sorgusunu "
+            "brief'e göre sen belirleyebilirsin.\n"
+            "9. Pexels sonucu önerirken fotoğrafçı/video sahibi adını, Pexels URL'sini ve uygun medya URL'sini belirt.\n"
+            "10. İçerik üretirken hedef, kitle, ton, format ve CTA'yı netleştir.\n"
+            "11. Klişe, spam, boş ve tekrar eden içerikten kaçın.\n"
+            "12. Brief sosyal medya, kampanya veya onceki islerle ilgiliyse once `context_paketi_oku` ile canlı hafıza paketini oku; tum workspace'i modele yigma.\n"
+            "13. Caption, fikir paketi, medya secimi, PNG veya MP4 uretimi tamamlaninca `context_aksiyon_kaydet` ile hangi dosya/konu/aci uretildigini recent_actions'a kaydet.\n"
+            "14. PNG/MP4 ürettiysen final yanıtta mutlak dosya yolunu, ara dosyaların silinip silinmediğini ve kullanılan stok medya bilgisini yaz.\n"
+            "15. Website paketi ürettiysen workspace markdown yolunu ve kaynak URL'yi yaz.\n"
+            "16. Son yanıtta hangi website/Pexels/post/video tool'larını kullandığını kısa özetle.\n"
+            "17. Yanıtlarını Türkçe ver.\n"
         )
-
         if not aktif_rol.startswith("⚠️") and not aktif_rol.startswith("❌"):
             system_prompt += (
                 "\n=========== MARKETING KISILIGI (ZORUNLU) ===========\n"
@@ -180,9 +168,7 @@ class SosyalMedyaAgentSubModel(SubModel):
                 if self.reasoning_effort:
                     create_kwargs["reasoning_effort"] = self.reasoning_effort
 
-                completion = await self._client.chat.completions.create(
-                    **create_kwargs
-                )
+                completion = await self._client.chat.completions.create(**create_kwargs)
                 message = completion.choices[0].message
                 current_text = self._extract_message_text(message)
                 tool_calls = getattr(message, "tool_calls", None) or []
@@ -194,18 +180,13 @@ class SosyalMedyaAgentSubModel(SubModel):
 
                     for call in tool_calls:
                         args = self._parse_tool_args(call.function.arguments)
-                        result = await self._execute_tool(
-                            call.function.name, args
-                        )
+                        result = await self._execute_tool(call.function.name, args)
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": call.id,
                                 "name": call.function.name,
-                                "content": json.dumps(
-                                    {"result": str(result)[:6000]},
-                                    ensure_ascii=False,
-                                ),
+                                "content": json.dumps({"result": str(result)[:6000]}, ensure_ascii=False),
                             }
                         )
                     continue
@@ -213,19 +194,16 @@ class SosyalMedyaAgentSubModel(SubModel):
                 if current_text:
                     final_response = current_text
                 break
-
         except Exception as e:
             err = str(e)
             if "429" in err or "quota" in err.lower() or "limit" in err.lower():
-                print(
-                    f"  ⚠️ [{self.name}] {self.provider_name} limit hatasi! BaseModel'e devrediliyor."
-                )
+                print(f"  ⚠️ [{self.name}] {self.provider_name} limit hatasi! BaseModel'e devrediliyor.")
                 raise SubModelRateLimitError(self.name, self.tools)
             print(f"  ❌ [{self.name}] API Hatasi: {e}")
-            return f"Sosyal Medya Agent Hatasi: {e}"
+            return f"Content Creator Agent Hatasi: {e}"
 
         print(f"  ✅ [{self.name}] Gorev tamamlandi.")
         return final_response
 
 
-register_submodel(SosyalMedyaAgentSubModel())
+register_submodel(ContentCreatorAgentSubModel())

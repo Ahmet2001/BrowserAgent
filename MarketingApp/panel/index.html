@@ -53,10 +53,13 @@
 
         <div class="stage">
             <header class="topbar">
-                <div class="topbar-copy">
-                    <p class="eyebrow">Operations Cockpit</p>
-                    <h2 id="current-tab-title">Komuta Merkezi</h2>
-                    <p id="connection-state" class="connection-state">API bağlantısı hazırlanıyor...</p>
+                <div class="topbar-copy-wrap">
+                    <button id="open-env-settings" class="icon-btn topbar-settings-btn" type="button" title="Env ayarlarını düzenle">⚙</button>
+                    <div class="topbar-copy">
+                        <p class="eyebrow">Operations Cockpit</p>
+                        <h2 id="current-tab-title">Komuta Merkezi</h2>
+                        <p id="connection-state" class="connection-state">API bağlantısı hazırlanıyor...</p>
+                    </div>
                 </div>
 
                 <div class="topbar-actions">
@@ -545,6 +548,37 @@
                 <input id="src-text-name" type="text" placeholder="Kaynak adı">
                 <textarea id="src-text-val" class="editor compact" placeholder="Metni buraya ekleyin..."></textarea>
                 <button id="btn-add-text" class="btn primary full-width">Metin Ekle</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="env-modal" class="modal hidden">
+        <div class="modal-content env-modal-content">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">Runtime Settings</p>
+                    <h3>Env Düzenleyici</h3>
+                    <p class="modal-copy">`.env` ve `.env.local` içeriklerini düzenleyebilirsin. Bazı değişiklikler için uygulamayı yeniden başlatmak gerekebilir.</p>
+                </div>
+                <button id="close-env-modal" class="icon-btn" type="button">×</button>
+            </div>
+
+            <div class="env-toolbar">
+                <label class="filter-field env-target-field">
+                    <span>Dosya</span>
+                    <select id="env-target-select">
+                        <option value=".env">.env</option>
+                        <option value=".env.local">.env.local</option>
+                    </select>
+                </label>
+                <div id="env-file-meta" class="micro-copy">Dosya bilgisi yükleniyor...</div>
+            </div>
+
+            <textarea id="env-editor" class="editor env-editor" placeholder="KEY=value"></textarea>
+
+            <div class="modal-actions">
+                <button id="reload-env-content" class="btn ghost" type="button">Yeniden Yükle</button>
+                <button id="save-env-content" class="btn primary" type="button">Kaydet</button>
             </div>
         </div>
     </div>

@@ -14,6 +14,8 @@ from .sistem_araclari import (
     terminal_komut_calistir,
 )
 from .workspace_araclari import (
+    context_aksiyon_kaydet,
+    context_paketi_oku,
     workspace_yaz,
     workspace_oku,
     workspace_sonunu_oku,
@@ -22,6 +24,17 @@ from .workspace_araclari import (
     workspace_ekle,
 )
 from .bellek_araclari import bellek_yaz, bellek_oku, bellek_sil, rol_oku, rol_guncelle
+from .content_creator_araclari import (
+    website_icerik_cikar,
+    website_iceriginden_post_paketi_uret,
+    pexels_fotograf_ara,
+    pexels_curated_fotograflar,
+    pexels_fotograf_detay,
+    pexels_video_ara,
+    pexels_populer_videolar,
+    video_post_olustur_ve_mp4_kaydet,
+    html_css_post_olustur_ve_png_kaydet,
+)
 
 
 def _missing_tool(tool_name: str, error: Exception):
@@ -100,6 +113,8 @@ try:
         update_queue_item,
         send_x_reply,
         publish_x_post,
+        publish_x_post_with_media,
+        submit_current_x_composer,
         publish_x_thread,
         reply_to_x_post,
         mark_queue_item,
@@ -140,6 +155,8 @@ except Exception as social_import_error:
     update_queue_item = _missing_tool("update_queue_item", social_import_error)
     send_x_reply = _missing_tool("send_x_reply", social_import_error)
     publish_x_post = _missing_tool("publish_x_post", social_import_error)
+    publish_x_post_with_media = _missing_tool("publish_x_post_with_media", social_import_error)
+    submit_current_x_composer = _missing_tool("submit_current_x_composer", social_import_error)
     publish_x_thread = _missing_tool("publish_x_thread", social_import_error)
     reply_to_x_post = _missing_tool("reply_to_x_post", social_import_error)
     mark_queue_item = _missing_tool("mark_queue_item", social_import_error)
@@ -243,6 +260,8 @@ except Exception as skill_loader_import_error:
 
 BASE_ARACLAR = [
     terminal_komut_calistir,
+    context_paketi_oku,
+    context_aksiyon_kaydet,
     workspace_yaz,
     workspace_oku,
     workspace_sonunu_oku,
@@ -279,6 +298,8 @@ SOSYAL_MEDYA_ARACLARI = [
     update_queue_item,
     send_x_reply,
     publish_x_post,
+    publish_x_post_with_media,
+    submit_current_x_composer,
     publish_x_thread,
     reply_to_x_post,
     mark_queue_item,
@@ -295,9 +316,12 @@ SOSYAL_MEDYA_ARACLARI = [
     like_youtube_video,
     subscribe_youtube_channel,
     # --- Workspace (strateji/log dosyalari icin) ---
+    context_paketi_oku,
+    context_aksiyon_kaydet,
     workspace_oku,
     workspace_sonunu_oku,
     workspace_yaz,
+    workspace_ekle,
     workspace_listele,
 ]
 
@@ -306,6 +330,8 @@ SISTEM_ARACLARI = [
     bellek_yaz,
     bellek_oku,
     bellek_sil,
+    context_paketi_oku,
+    context_aksiyon_kaydet,
     workspace_yaz,
     workspace_oku,
     workspace_sonunu_oku,
@@ -317,6 +343,8 @@ SISTEM_ARACLARI = [
 
 ARAMA_ARACLARI = [
     web_arama,
+    context_paketi_oku,
+    context_aksiyon_kaydet,
     workspace_oku,
     workspace_sonunu_oku,
     workspace_yaz,
@@ -326,6 +354,8 @@ ARAMA_ARACLARI = [
 
 KOD_ARACLARI = [
     terminal_komut_calistir,
+    context_paketi_oku,
+    context_aksiyon_kaydet,
     workspace_yaz,
     workspace_oku,
     workspace_sonunu_oku,
@@ -344,7 +374,29 @@ VLM_ARACLARI = [
     get_pixel_color,
 ]
 
-GENERIC_BROWSER_TOOLS_ACTIVE = False
+CONTENT_CREATOR_ARACLARI = [
+    website_icerik_cikar,
+    website_iceriginden_post_paketi_uret,
+    pexels_fotograf_ara,
+    pexels_curated_fotograflar,
+    pexels_fotograf_detay,
+    pexels_video_ara,
+    pexels_populer_videolar,
+    video_post_olustur_ve_mp4_kaydet,
+    html_css_post_olustur_ve_png_kaydet,
+    rol_oku,
+    bellek_oku,
+    web_arama,
+    context_paketi_oku,
+    context_aksiyon_kaydet,
+    workspace_oku,
+    workspace_sonunu_oku,
+    workspace_yaz,
+    workspace_ekle,
+    workspace_listele,
+]
+
+GENERIC_BROWSER_TOOLS_ACTIVE = True
 
 BROWSER_ARACLARI = [] if not GENERIC_BROWSER_TOOLS_ACTIVE else [
     browser_baslat,
@@ -388,6 +440,7 @@ _loaded_skills = load_skills()
 _AGENT_TOOL_MAP = {
     "base": BASE_ARACLAR,
     "sosyal_medya_agent": SOSYAL_MEDYA_ARACLARI,
+    "content_creator_agent": CONTENT_CREATOR_ARACLARI,
     "sistem_agent": SISTEM_ARACLARI,
     "arastirma_agent": ARAMA_ARACLARI,
     "kod_agent": KOD_ARACLARI,

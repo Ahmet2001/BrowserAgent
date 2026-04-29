@@ -244,8 +244,29 @@ button {
     margin-bottom: 24px;
 }
 
+.topbar-copy-wrap {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+}
+
 .topbar-copy {
     max-width: 520px;
+}
+
+.topbar-settings-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    font-size: 1.1rem;
+    background: linear-gradient(135deg, rgba(25, 211, 197, 0.18), rgba(255, 156, 58, 0.14));
+    border-color: rgba(25, 211, 197, 0.22);
+    box-shadow: 0 18px 32px rgba(0, 0, 0, 0.22);
+}
+
+.topbar-settings-btn:hover {
+    border-color: rgba(255, 156, 58, 0.34);
+    transform: translateY(-1px);
 }
 
 .connection-state {
@@ -1194,12 +1215,35 @@ button {
     box-shadow: var(--shadow);
 }
 
+.env-modal-content {
+    width: min(100%, 860px);
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;
     gap: 12px;
     align-items: flex-start;
     margin-bottom: 18px;
+}
+
+.env-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.env-target-field {
+    min-width: 180px;
+}
+
+.env-editor {
+    min-height: 420px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.94rem;
+    line-height: 1.55;
 }
 
 .modal-actions {
