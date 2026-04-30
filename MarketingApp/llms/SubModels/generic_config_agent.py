@@ -1,16 +1,14 @@
-"""
-Content Creator Agent SubModel — medya arama, brief ve içerik üretim uzmanı.
-"""
+"""Generic config-backed SubModel used by Agent Studio."""
 
 from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 from openai import AsyncOpenAI
 
-from .base import SubModel, SubModelRateLimitError, register_submodel
-from MarketingApp.araclar import CONTENT_CREATOR_ARACLARI
+from .base import SubModel, SubModelRateLimitError
 from MarketingApp.llms.runtime_config import (
     get_base_model_name,
     get_base_reasoning_effort,
@@ -20,65 +18,51 @@ from MarketingApp.llms.runtime_config import (
 )
 
 
-DEFAULT_SYSTEM_PROMPT = (
-    "Sen yaratıcı bir content creator ajansın. Görevin; verilen brief'ten yüksek kaliteli "
-    "içerik fikirleri, metinler ve medya seçenekleri çıkarmaktır.\n\n"
-    "CALISMA PRENSIPLERI:\n"
-    "1. Platform aksiyonu yapma, paylaşım yapma veya kullanıcı adına yayınlama. Yalnızca üret, ara ve raporla.\n"
-    "2. Kullanıcı URL verirse veya web sitesinden içerik çıkarma isterse önce `website_icerik_cikar` kullan.\n"
-    "2b. Web sitesini doğrudan sosyal medya içeriğine çevirmek gerekirse `website_iceriginden_post_paketi_uret` kullan.\n"
-    "3. Görsel veya video stok medya gerekiyorsa Pexels araçlarını kullan.\n"
-    "4. Fotoğraf araması için `pexels_fotograf_ara`, seçkiler için `pexels_curated_fotograflar`, "
-    "tekil detay için `pexels_fotograf_detay` kullan.\n"
-    "5. Video araması için `pexels_video_ara`, popüler videolar için `pexels_populer_videolar` kullan.\n"
-    "6. Kullanıcı Reels, Shorts, TikTok, stok videolu video veya MP4 çıktı isterse "
-    "`video_post_olustur_ve_mp4_kaydet` aracını kullan.\n"
-    "7. Kullanıcı görselli post, afiş, kapak, X/Instagram/LinkedIn postu veya PNG çıktı isterse "
-    "`html_css_post_olustur_ve_png_kaydet` aracını kullan; sadece metin veya plan yazmakla yetinme.\n"
-    "8. HTML/CSS post veya MP4 üretirken başlık, alt başlık, CTA, platform, boyut, renk ve stok medya sorgusunu "
-    "brief'e göre sen belirleyebilirsin.\n"
-    "9. Pexels sonucu önerirken fotoğrafçı/video sahibi adını, Pexels URL'sini ve uygun medya URL'sini belirt.\n"
-    "10. İçerik üretirken hedef, kitle, ton, format ve CTA'yı netleştir.\n"
-    "11. Klişe, spam, boş ve tekrar eden içerikten kaçın.\n"
-    "12. Brief sosyal medya, kampanya veya onceki islerle ilgiliyse once `context_paketi_oku` ile canlı hafıza paketini oku; tum workspace'i modele yigma.\n"
-    "13. Caption, fikir paketi, medya secimi, PNG veya MP4 uretimi tamamlaninca `context_aksiyon_kaydet` ile hangi dosya/konu/aci uretildigini recent_actions'a kaydet.\n"
-    "14. PNG/MP4 ürettiysen final yanıtta mutlak dosya yolunu, ara dosyaların silinip silinmediğini ve kullanılan stok medya bilgisini yaz.\n"
-    "15. Website paketi ürettiysen workspace markdown yolunu ve kaynak URL'yi yaz.\n"
-    "16. Son yanıtta hangi website/Pexels/post/video tool'larını kullandığını kısa özetle.\n"
-    "17. Yanıtlarını Türkçe ver.\n"
+GENERIC_CONFIG_DEFAULT_PROMPT = (
+    "Sen Agent Studio ile olusturulmus ozel bir alt ajansin. "
+    "Sadece sana baglanan araclari kullan, gorevi kisa ve net tamamla."
+)
+
+GENERIC_CONFIG_WORK_RULES = (
+    "CALISMA KURALLARI:\n"
+    "1. Sadece tool listende bulunan araclari kullan.\n"
+    "2. Workspace veya sosyal medya baglami gerekiyorsa once mevcut hafiza/context araclarini kullan.\n"
+    "3. Final cevabini Turkce, kisa ve denetlenebilir sekilde ver.\n"
 )
 
 
-class ContentCreatorAgentSubModel(SubModel):
-    """Caption, kreatif brief, görsel/video medya arama ve içerik paketleme uzmanı."""
+def build_generic_config_system_prompt(system_prompt: str | None = None) -> str:
+    prompt = (system_prompt or "").strip() or GENERIC_CONFIG_DEFAULT_PROMPT
+    return f"{prompt}\n\n{GENERIC_CONFIG_WORK_RULES}"
 
-    def __init__(self):
-        api_key = get_model_api_key()
+
+class GenericConfigAgent(SubModel):
+    """A SubModel assembled from agents.yaml prompt, model and selected tools."""
+
+    def __init__(self, config: dict[str, Any], tools: list):
+        self.config = dict(config)
         self.provider_name = get_provider_display_name()
         self.reasoning_effort = get_base_reasoning_effort()
-        if not api_key:
-            print(f"⚠️  UYARI: {self.provider_name} API anahtari bulunamadi!")
-
-        super(ContentCreatorAgentSubModel, self).__init__(
-            name="content_creator_agent",
-            description=(
-                "Icerik uretim ve medya arama uzmani. Caption, thread, carousel akisi, "
-                "kreatif kampanya fikri, thumbnail brief'i, video storyboard'i, Pexels "
-                "uzerinden stok fotograf/video arama, verilen web sitesinden icerik cikarip "
-                "post paketine donusturme, HTML/CSS ile PNG post uretme ve stok videolu MP4 "
-                "sosyal medya videosu olusturma "
-                "gorevleri icin bu ajani kullan. Platformda paylasim yapmaz; uygun medya "
-                "seceneklerini, kaynak linklerini, PNG/MP4 dosya yolunu ve kullanilabilir "
-                "icerik metinlerini hazirlar."
-            ),
-            model_id=get_base_model_name(),
+        api_key = get_model_api_key()
+        model_id = self._resolve_model_id(self.config.get("model"))
+        description = self.config.get("description") or "Config tabanli ozel alt ajan."
+        super(GenericConfigAgent, self).__init__(
+            name=self.config["name"],
+            description=description,
+            model_id=model_id,
             api_key=api_key,
-            tools=CONTENT_CREATOR_ARACLARI,
+            tools=tools,
         )
         self._client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=get_openai_compat_base_url(),
         )
+
+    def _resolve_model_id(self, configured: str | None) -> str:
+        model = (configured or "default").strip()
+        if model in {"", "default", "base_default"}:
+            return get_base_model_name()
+        return model
 
     def _strip_thought_blocks(self, text: str) -> str:
         return re.sub(r"<thought>.*?</thought>", "", text or "", flags=re.DOTALL | re.IGNORECASE).strip()
@@ -140,28 +124,19 @@ class ContentCreatorAgentSubModel(SubModel):
         except Exception:
             return {}
 
+    def _build_system_prompt(self) -> str:
+        return build_generic_config_system_prompt(self.config.get("system_prompt"))
+
     async def run(self, gorev: str) -> str:
-        print(f"\n🎨 [{self.name}] Icerik uretim gorevi baslatiliyor: {gorev[:120]}...")
-
-        from MarketingApp.araclar import rol_oku
-
-        aktif_rol = rol_oku()
-        system_prompt = DEFAULT_SYSTEM_PROMPT
-        if not aktif_rol.startswith("⚠️") and not aktif_rol.startswith("❌"):
-            system_prompt += (
-                "\n=========== MARKETING KISILIGI (ZORUNLU) ===========\n"
-                f"{aktif_rol}\n"
-                "===================================================\n"
-            )
-
+        print(f"\n[{self.name}] Config agent gorevi baslatiliyor: {gorev[:120]}...")
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": self._build_system_prompt()},
             {"role": "user", "content": gorev},
         ]
         final_response = "Tamamlandi"
 
         try:
-            for _ in range(16):
+            for _ in range(12):
                 create_kwargs = {
                     "model": self.model_id,
                     "messages": messages,
@@ -180,7 +155,6 @@ class ContentCreatorAgentSubModel(SubModel):
                     messages.append(self._assistant_message_payload(message))
                     if current_text:
                         final_response = current_text
-
                     for call in tool_calls:
                         args = self._parse_tool_args(call.function.arguments)
                         result = await self._execute_tool(call.function.name, args)
@@ -197,16 +171,10 @@ class ContentCreatorAgentSubModel(SubModel):
                 if current_text:
                     final_response = current_text
                 break
-        except Exception as e:
-            err = str(e)
+        except Exception as exc:
+            err = str(exc)
             if "429" in err or "quota" in err.lower() or "limit" in err.lower():
-                print(f"  ⚠️ [{self.name}] {self.provider_name} limit hatasi! BaseModel'e devrediliyor.")
                 raise SubModelRateLimitError(self.name, self.tools)
-            print(f"  ❌ [{self.name}] API Hatasi: {e}")
-            return f"Content Creator Agent Hatasi: {e}"
+            return f"{self.name} hatasi: {exc}"
 
-        print(f"  ✅ [{self.name}] Gorev tamamlandi.")
         return final_response
-
-
-register_submodel(ContentCreatorAgentSubModel())

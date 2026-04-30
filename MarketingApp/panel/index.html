@@ -42,6 +42,10 @@
                     <span class="nav-icon">△</span>
                     <span>Otomasyon</span>
                 </button>
+                <button class="nav-item" data-tab="agent-studio" data-title="Agent Studio">
+                    <span class="nav-icon">◇</span>
+                    <span>Agent Studio</span>
+                </button>
             </nav>
 
             <div class="sidebar-status card-surface">
@@ -490,6 +494,143 @@
                         </article>
                     </div>
                 </section>
+
+                <section id="tab-agent-studio" class="tab-panel">
+                    <div class="agent-studio-toolbar card-surface">
+                        <div>
+                            <p class="eyebrow">Agent Studio</p>
+                            <h3>Kodsuz Subagent Builder</h3>
+                        </div>
+                        <div class="toolbar-actions">
+                            <button id="agent-studio-refresh" class="btn ghost">Kataloğu Yenile</button>
+                            <button id="agent-studio-new-agent" class="btn ghost">Yeni Agent</button>
+                            <button id="agent-studio-reload-runtime" class="btn primary">Runtime Reload</button>
+                        </div>
+                    </div>
+
+                    <div class="agent-studio-grid">
+                        <article class="card-surface agent-studio-list-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Agents</p>
+                                    <h3>Config Registry</h3>
+                                </div>
+                            </div>
+                            <div id="agent-studio-agent-list" class="stack-list empty-copy">Agent kataloğu yükleniyor...</div>
+                            <div id="agent-studio-errors" class="studio-errors"></div>
+                        </article>
+
+                        <article class="card-surface agent-studio-editor-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Agent Definition</p>
+                                    <h3>Agent Formu</h3>
+                                </div>
+                                <div class="toolbar-actions">
+                                    <button id="agent-studio-delete-agent" class="btn danger">Sil</button>
+                                    <button id="agent-studio-save-agent" class="btn primary">Kaydet</button>
+                                </div>
+                            </div>
+                            <div class="studio-form-grid">
+                                <label class="filter-field">
+                                    <span>Ad</span>
+                                    <input id="agent-studio-name" type="text" placeholder="ornek_agent">
+                                </label>
+                                <label class="filter-field">
+                                    <span>Tip</span>
+                                    <select id="agent-studio-type">
+                                        <option value="config">Config</option>
+                                        <option value="builtin">Builtin Python Scaffold</option>
+                                    </select>
+                                </label>
+                                <label class="filter-field">
+                                    <span>Model</span>
+                                    <input id="agent-studio-model" type="text" placeholder="default">
+                                </label>
+                                <label class="toggle-row">
+                                    <input id="agent-studio-enabled" type="checkbox">
+                                    <span>Aktif</span>
+                                </label>
+                            </div>
+                            <label class="filter-field">
+                                <span>Açıklama</span>
+                                <input id="agent-studio-description" type="text" placeholder="Bu agent ne zaman kullanılmalı?">
+                            </label>
+                            <label class="filter-field">
+                                <span>System Prompt</span>
+                                <textarea id="agent-studio-prompt" class="editor compact" placeholder="Agent rolünü ve çalışma kurallarını yaz..."></textarea>
+                            </label>
+                            <div class="tool-selector-head">
+                                <div>
+                                    <p class="eyebrow">Tools</p>
+                                    <h3>Tool Kataloğu</h3>
+                                </div>
+                                <label class="filter-field tool-search-field">
+                                    <span>Filtre</span>
+                                    <input id="agent-studio-tool-search" type="search" placeholder="Tool ara...">
+                                </label>
+                            </div>
+                            <div id="agent-studio-tool-list" class="tool-check-grid"></div>
+                        </article>
+
+                        <article class="card-surface custom-tool-card">
+                            <div class="section-heading">
+                                <div>
+                                    <p class="eyebrow">Custom Tools</p>
+                                    <h3>Trusted Python Tool</h3>
+                                </div>
+                                <div class="toolbar-actions">
+                                    <button id="custom-tool-new" class="btn ghost">Yeni Tool</button>
+                                    <button id="custom-tool-save" class="btn primary">Kaydet</button>
+                                </div>
+                            </div>
+                            <div id="custom-tool-list" class="stack-list compact-list empty-copy">Custom tool yok.</div>
+                            <div class="custom-ai-box">
+                                <label class="filter-field">
+                                    <span>AI Brief</span>
+                                    <textarea id="custom-tool-ai-brief" class="editor compact" placeholder="Örn: Verilen URL listesindeki domainleri sayan ve en çok tekrar eden domainleri döndüren bir tool oluştur."></textarea>
+                                </label>
+                                <button id="custom-tool-ai-generate" class="btn ghost full-width" type="button">AI ile Tool Oluştur</button>
+                            </div>
+                            <div id="custom-tool-ai-conversation" class="ai-conversation empty-copy">AI brief sohbeti burada görünecek.</div>
+                            <div class="studio-form-grid">
+                                <label class="filter-field">
+                                    <span>Tool Adı</span>
+                                    <input id="custom-tool-name" type="text" placeholder="ornek_tool">
+                                </label>
+                                <label class="toggle-row">
+                                    <input id="custom-tool-enabled" type="checkbox">
+                                    <span>Aktif</span>
+                                </label>
+                            </div>
+                            <label class="filter-field">
+                                <span>Açıklama</span>
+                                <input id="custom-tool-description" type="text" placeholder="Tool ne döndürür?">
+                            </label>
+                            <label class="filter-field">
+                                <span>Parametre Notu</span>
+                                <input id="custom-tool-params-note" type="text" placeholder='Örn: {"text": "merhaba"}'>
+                            </label>
+                            <label class="filter-field">
+                                <span>.env.model Değişkenleri JSON</span>
+                                <textarea id="custom-tool-env-vars" class="editor compact" spellcheck="false" placeholder='{"NEWS_API_KEY": "buraya_key"}'></textarea>
+                            </label>
+                            <textarea id="custom-tool-code" class="editor custom-tool-code" spellcheck="false">def ornek_tool(text: str) -> str:
+    return text.upper()
+</textarea>
+                            <div class="custom-test-grid">
+                                <label class="filter-field">
+                                    <span>Test Argümanı JSON</span>
+                                    <textarea id="custom-tool-test-args" class="editor compact" spellcheck="false">{}</textarea>
+                                </label>
+                                <div>
+                                    <button id="custom-tool-test" class="btn ghost full-width">Test Et</button>
+                                    <pre id="custom-tool-test-result" class="code-view custom-test-result">Test çıktısı bekleniyor...</pre>
+                                </div>
+                            </div>
+                        </article>
+                    </div>
+                </section>
             </main>
         </div>
     </div>
@@ -569,6 +710,7 @@
                     <select id="env-target-select">
                         <option value=".env">.env</option>
                         <option value=".env.local">.env.local</option>
+                        <option value=".env.model">.env.model</option>
                     </select>
                 </label>
                 <div id="env-file-meta" class="micro-copy">Dosya bilgisi yükleniyor...</div>

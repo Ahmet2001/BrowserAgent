@@ -1,3 +1,6 @@
+import asyncio
+import ast
+import inspect
 import os
 import json
 import time
@@ -8,7 +11,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel as PydanticBaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, get_args, get_origin
 from dotenv import load_dotenv
 
 from MarketingApp.enviroments.automation_runtime import (
@@ -16,6 +19,10 @@ from MarketingApp.enviroments.automation_runtime import (
     try_acquire_automation,
 )
 from MarketingApp.enviroments import heartbeat as heartbeat_runtime
+from MarketingApp.llms.runtime_config import (
+    get_tool_generator_model_name,
+    get_tool_generator_reasoning_effort,
+)
 
 app = FastAPI()
 
@@ -44,6 +51,7 @@ ROLE_FILE = os.path.join(WORKSPACE_DIR, "role.md")
 ENV_FILES = {
     ".env": os.path.join(PROJECT_ROOT, ".env"),
     ".env.local": os.path.join(PROJECT_ROOT, ".env.local"),
+    ".env.model": os.path.join(PROJECT_ROOT, ".env.model"),
 }
 
 # Ensure directories exist
@@ -121,6 +129,38 @@ class EnvFileUpdate(PydanticBaseModel):
     target: str
     content: str
 
+
+class AgentStudioAgentPayload(PydanticBaseModel):
+    name: str
+    enabled: bool = True
+    description: str = ""
+    model: str = "default"
+    tool_mode: str = "custom"
+    system_prompt: str = ""
+    tools: list[str] = []
+    type: str = "config"
+
+
+class AgentStudioCustomToolPayload(PydanticBaseModel):
+    name: str
+    description: str = ""
+    code: str
+    enabled: bool = True
+    params_note: str = ""
+    env_vars: Dict[str, Any] = {}
+
+
+class AgentStudioCustomToolTestPayload(PydanticBaseModel):
+    arguments: Dict[str, Any] = {}
+
+
+class AgentStudioCustomToolGeneratePayload(PydanticBaseModel):
+    brief: str
+    current_name: str = ""
+    current_description: str = ""
+    current_code: str = ""
+    conversation: list[dict[str, str]] = []
+
 def set_base_model(bm):
     global _base_model
     _base_model = bm
@@ -136,10 +176,13 @@ def _resolve_env_target(target: str) -> tuple[str, str]:
 def _reload_runtime_env_files():
     env_path = ENV_FILES[".env"]
     env_local_path = ENV_FILES[".env.local"]
+    env_model_path = ENV_FILES[".env.model"]
     if os.path.exists(env_path):
         load_dotenv(dotenv_path=env_path, override=True)
     if os.path.exists(env_local_path):
         load_dotenv(dotenv_path=env_local_path, override=True)
+    if os.path.exists(env_model_path):
+        load_dotenv(dotenv_path=env_model_path, override=True)
 
 
 def _busy_http_detail(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -188,6 +231,404 @@ def _load_social_workflow():
         "send_x_reply": send_x_reply,
         "update_queue_item": update_queue_item,
     }
+
+
+def _load_agent_studio_helpers():
+    try:
+        from MarketingApp.llms.agent_studio import (
+            AgentStudioError,
+            create_builtin_agent_scaffold,
+            delete_agent_config,
+            load_agent_studio_catalog,
+            load_custom_tool_callable,
+            load_custom_tools_config,
+            upsert_agent_config,
+            upsert_custom_tool,
+            validate_tool_name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent Studio yüklenemedi: {e}")
+
+    return {
+        "AgentStudioError": AgentStudioError,
+        "create_builtin_agent_scaffold": create_builtin_agent_scaffold,
+        "delete_agent_config": delete_agent_config,
+        "load_agent_studio_catalog": load_agent_studio_catalog,
+        "load_custom_tool_callable": load_custom_tool_callable,
+        "load_custom_tools_config": load_custom_tools_config,
+        "upsert_agent_config": upsert_agent_config,
+        "upsert_custom_tool": upsert_custom_tool,
+        "validate_tool_name": validate_tool_name,
+    }
+
+
+def _short_text(value: Any, limit: int = 160) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _build_tool_generator_live_context(helpers: dict[str, Any]) -> str:
+    """Build a fresh, compact Agent Studio map for AI custom tool generation."""
+    try:
+        catalog = helpers["load_agent_studio_catalog"]()
+    except Exception as exc:
+        return f"Canli Agent Studio katalogu okunamadi: {exc}"
+
+    agents = catalog.get("agents") if isinstance(catalog.get("agents"), list) else []
+    tools = catalog.get("tools") if isinstance(catalog.get("tools"), list) else []
+    custom_tools = catalog.get("custom_tools") if isinstance(catalog.get("custom_tools"), list) else []
+    paths = catalog.get("paths") if isinstance(catalog.get("paths"), dict) else {}
+    errors = catalog.get("errors") if isinstance(catalog.get("errors"), list) else []
+
+    category_counts: dict[str, int] = {}
+    risk_counts: dict[str, int] = {}
+    for tool in tools:
+        category = str(tool.get("category") or "unknown")
+        risk = str(tool.get("risk") or "unknown")
+        category_counts[category] = category_counts.get(category, 0) + 1
+        risk_counts[risk] = risk_counts.get(risk, 0) + 1
+
+    lines = [
+        "Bu bolum her AI tool generate isteginde MarketingApp Agent Studio katalogundan canli uretilir; statik dokuman degildir.",
+        "Secret degerleri prompt'a alinmaz. API key ve token gibi degerler .env.model icinde tutulur; tool kodu os.getenv ile okur.",
+        "",
+        "Onemli yollar:",
+    ]
+    for key in ("agents_config", "custom_tools_config", "custom_tools_dir", "submodels_dir", "submodels_init", "model_env"):
+        value = paths.get(key)
+        if value:
+            lines.append(f"- {key}: {value}")
+
+    lines.extend(["", "Runtime agent katalogu:"])
+    if agents:
+        for agent in agents[:40]:
+            configured_tools = agent.get("tools") if isinstance(agent.get("tools"), list) else []
+            description = _short_text(agent.get("description"), 120)
+            lines.append(
+                "- "
+                f"{agent.get('name')} | type={agent.get('type', 'config')} | enabled={bool(agent.get('enabled', True))} "
+                f"| model={agent.get('model', 'default')} | tool_mode={agent.get('tool_mode', 'default')} "
+                f"| selected_tools={len(configured_tools)} | desc={description}"
+            )
+    else:
+        lines.append("- Agent yok veya katalog okunamadi.")
+
+    recommended = catalog.get("recommended_memory_tools") or []
+    if recommended:
+        lines.append("")
+        lines.append("Onerilen hafiza tool'lari: " + ", ".join(map(str, recommended)))
+
+    lines.extend(["", "Tool registry ozeti:"])
+    if category_counts:
+        lines.append(
+            "- Kategoriler: "
+            + ", ".join(f"{name}={count}" for name, count in sorted(category_counts.items()))
+        )
+    if risk_counts:
+        lines.append(
+            "- Risk seviyeleri: "
+            + ", ".join(f"{name}={count}" for name, count in sorted(risk_counts.items()))
+        )
+
+    active_by_category: dict[str, list[dict[str, Any]]] = {}
+    for tool in tools:
+        if not tool.get("active", True):
+            continue
+        category = str(tool.get("category") or "unknown")
+        active_by_category.setdefault(category, []).append(tool)
+
+    for category in sorted(active_by_category):
+        examples = []
+        for tool in active_by_category[category][:14]:
+            signature = _short_text(tool.get("signature"), 80)
+            description = _short_text(tool.get("description"), 80)
+            source = tool.get("source") or "builtin"
+            risk = tool.get("risk") or "unknown"
+            examples.append(f"{tool.get('name')}{signature} [{source}/{risk}] {description}".strip())
+        if examples:
+            lines.append(f"- {category}: " + " | ".join(examples))
+
+    lines.extend(["", "Custom tool katalogu:"])
+    if custom_tools:
+        for item in custom_tools[:30]:
+            env_vars = item.get("env_vars") if isinstance(item.get("env_vars"), list) else []
+            env_label = ", ".join(map(str, env_vars)) if env_vars else "-"
+            params_note = _short_text(item.get("params_note"), 140)
+            description = _short_text(item.get("description"), 140)
+            error = _short_text(item.get("error"), 120) if item.get("error") else ""
+            suffix = f" | error={error}" if error else ""
+            lines.append(
+                f"- {item.get('name')} | enabled={bool(item.get('enabled', False))} "
+                f"| env_vars={env_label} | params={params_note} | desc={description}{suffix}"
+            )
+    else:
+        lines.append("- Henuz custom tool yok.")
+
+    if errors:
+        lines.extend(["", "Katalog hatalari/uyarilari:"])
+        for item in errors[:12]:
+            if isinstance(item, dict):
+                lines.append(f"- {item.get('scope', 'unknown')}: {_short_text(item.get('message'), 180)}")
+            else:
+                lines.append(f"- {_short_text(item, 180)}")
+
+    lines.extend(
+        [
+            "",
+            "Custom tool sozlesmesi:",
+            "- Tool dosyalari workspace/custom_tools/ altina kaydedilir ve config/custom_tools.yaml ile kataloglanir.",
+            "- Her custom tool ayni isimde tek ana Python fonksiyonu export etmeli.",
+            "- Fonksiyon parametreleri basit tiplerle yazilmali; panel test_args JSON'unu bu imzaya gore test eder.",
+            "- Env gereksinimi varsa env_vars alaninda sadece degisken adlarini dondur; degerleri kullanicidan alip .env.model dosyasina yazacak panel akisi kullanilir.",
+        ]
+    )
+    return "\n".join(lines)[:12000]
+
+
+def _json_safe_result(value: Any) -> Any:
+    try:
+        json.dumps(value, ensure_ascii=False)
+        return value
+    except TypeError:
+        return str(value)
+
+
+def _model_to_dict(model: PydanticBaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if not match:
+        raise ValueError("Model JSON obje dondurmedi.")
+    parsed = json.loads(match.group(0))
+    if not isinstance(parsed, dict):
+        raise ValueError("Model cevabi JSON obje degil.")
+    return parsed
+
+
+def _strip_code_fence(text: str) -> str:
+    code = (text or "").strip()
+    if code.startswith("```"):
+        code = re.sub(r"^```(?:python|py)?\s*", "", code, flags=re.IGNORECASE)
+        code = re.sub(r"\s*```$", "", code)
+    return code.strip()
+
+
+def _first_function_name(code: str) -> str:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return ""
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node.name
+    return ""
+
+
+def _slug_tool_name(text: str, fallback: str = "ai_custom_tool") -> str:
+    tr_map = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
+    normalized = (text or "").translate(tr_map).lower()
+    normalized = re.sub(r"[^a-z0-9_]+", "_", normalized).strip("_")
+    if not normalized or not normalized[0].isalpha():
+        normalized = fallback
+    normalized = re.sub(r"_+", "_", normalized)[:48].strip("_") or fallback
+    if len(normalized) < 3:
+        normalized = fallback
+    return normalized
+
+
+def _normalize_generated_payload(payload: dict[str, Any], fallback_name: str) -> dict[str, Any]:
+    data = dict(payload or {})
+    code = (
+        data.get("code")
+        or data.get("python_code")
+        or data.get("function_code")
+        or data.get("tool_code")
+        or ""
+    )
+    data["code"] = _strip_code_fence(str(code))
+    candidate_name = str(data.get("name") or "").strip()
+    if not candidate_name:
+        candidate_name = _first_function_name(data["code"]) or fallback_name
+    data["name"] = candidate_name
+    if not data.get("description"):
+        data["description"] = "AI tarafindan uretilen custom tool."
+    if isinstance(data.get("params_note"), dict):
+        data["params_note"] = json.dumps(data["params_note"], ensure_ascii=False)
+    return data
+
+
+def _validate_generated_tool_payload(payload: dict[str, Any], validate_tool_name_func, fallback_name: str = "ai_custom_tool") -> dict[str, Any]:
+    payload = _normalize_generated_payload(payload, fallback_name)
+    code = str(payload.get("code") or "").strip()
+    if not code:
+        raise ValueError("AI tool kodu bos geldi.")
+
+    first_func_name = _first_function_name(code)
+    raw_name = str(payload.get("name") or "").strip()
+    try:
+        name = validate_tool_name_func(raw_name)
+    except Exception:
+        name = validate_tool_name_func(first_func_name or fallback_name)
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        raise ValueError(f"AI tool kodunda syntax hatasi: {exc}") from exc
+
+    function_names = [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    if name not in function_names:
+        if len(function_names) == 1:
+            name = validate_tool_name_func(function_names[0])
+        else:
+            raise ValueError(f"AI kodu `{name}` fonksiyonunu tanimlamiyor.")
+
+    return {
+        "name": name,
+        "description": str(payload.get("description") or "").strip(),
+        "params_note": str(payload.get("params_note") or "").strip(),
+        "test_args": payload.get("test_args") if isinstance(payload.get("test_args"), dict) else {},
+        "env_vars": payload.get("env_vars") if isinstance(payload.get("env_vars"), dict) else {},
+        "code": code + ("\n" if not code.endswith("\n") else ""),
+    }
+
+
+def _fallback_generated_tool_payload(brief: str, validate_tool_name_func) -> dict[str, Any]:
+    name = validate_tool_name_func(_slug_tool_name(brief, "ai_custom_tool"))
+    code = (
+        f"def {name}(text: str = \"\") -> dict:\n"
+        "    \"\"\"AI tool uretimi JSON onarimindan gecemediginde olusan guvenli taslak.\"\"\"\n"
+        "    return {\n"
+        "        \"status\": \"draft\",\n"
+        "        \"message\": \"Bu guvenli iskelet tool'dur; kodu ihtiyaca gore duzenleyip test edin.\",\n"
+        f"        \"brief\": {json.dumps(brief[:500], ensure_ascii=False)},\n"
+        "        \"input\": text,\n"
+        "    }\n"
+    )
+    return {
+        "name": name,
+        "description": "AI ciktisi onarilamadigi icin olusturulan guvenli custom tool taslagi.",
+        "params_note": "{\"text\": \"ornek metin\"}",
+        "test_args": {"text": "ornek metin"},
+        "env_vars": {},
+        "code": code,
+    }
+
+
+def _annotation_from_string(annotation: str):
+    normalized = annotation.strip().lower()
+    aliases = {
+        "str": str,
+        "string": str,
+        "int": int,
+        "integer": int,
+        "float": float,
+        "number": float,
+        "bool": bool,
+        "boolean": bool,
+        "dict": dict,
+        "list": list,
+    }
+    return aliases.get(normalized, annotation)
+
+
+def _coerce_value_for_annotation(value: Any, annotation: Any) -> Any:
+    if annotation is inspect.Parameter.empty or annotation is Any:
+        return value
+    if isinstance(annotation, str):
+        annotation = _annotation_from_string(annotation)
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if args:
+            return _coerce_value_for_annotation(value, args[0])
+
+    if value is None:
+        return None
+    if annotation is str:
+        return str(value)
+    if annotation is int and not isinstance(value, bool):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            return int(value.strip())
+    if annotation is float:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        if isinstance(value, str):
+            return float(value.strip().replace(",", "."))
+    if annotation is bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "evet", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "hayir", "hayır", "off"}:
+                return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+    if annotation in {dict, list} and isinstance(value, str):
+        parsed = json.loads(value)
+        if isinstance(parsed, annotation):
+            return parsed
+    return value
+
+
+def _coerce_custom_tool_args(func, args: dict[str, Any]) -> dict[str, Any]:
+    sig = inspect.signature(func)
+    coerced = {}
+    for name, value in args.items():
+        param = sig.parameters.get(name)
+        if not param:
+            coerced[name] = value
+            continue
+        annotation = param.annotation
+        if annotation is inspect.Parameter.empty and param.default is not inspect.Parameter.empty and param.default is not None:
+            annotation = type(param.default)
+        try:
+            coerced[name] = _coerce_value_for_annotation(value, annotation)
+        except Exception:
+            coerced[name] = value
+    return coerced
+
+
+def _build_agent_studio_snapshot() -> dict[str, Any]:
+    try:
+        helpers = _load_agent_studio_helpers()
+        return helpers["load_agent_studio_catalog"]()
+    except HTTPException as exc:
+        return {
+            "agents": [],
+            "tools": [],
+            "custom_tools": [],
+            "recommended_memory_tools": [],
+            "paths": {},
+            "errors": [{"scope": "agent_studio", "message": str(exc.detail)}],
+        }
 
 
 def _build_social_snapshot() -> dict[str, Any]:
@@ -323,6 +764,7 @@ async def get_panel_bootstrap():
         "heartbeat_status": await get_heartbeat_status(),
         "heartbeat_jobs": await get_heartbeat_jobs(),
         "social": _build_social_snapshot(),
+        "agent_studio": _build_agent_studio_snapshot(),
     }
 
 @app.post("/api/agents/{name}/toggle")
@@ -343,12 +785,305 @@ async def toggle_agent(name: str):
 async def toggle_tool(name: str):
     if not _base_model or not hasattr(_base_model, 'active_tools'):
         raise HTTPException(status_code=500, detail="BaseModel not ready")
-    
-    if name in _base_model.active_tools:
-        current = _base_model.active_tools[name]
-        _base_model.active_tools[name] = not current
-        return {"name": name, "active": not current}
-    raise HTTPException(status_code=404, detail="Tool not found")
+
+    try:
+        if hasattr(_base_model, "toggle_tool"):
+            active = _base_model.toggle_tool(name)
+        else:
+            if name not in _base_model.active_tools:
+                raise KeyError(name)
+            current = _base_model.active_tools[name]
+            _base_model.active_tools[name] = not current
+            active = not current
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Tool not found")
+
+    return {
+        "name": name,
+        "active": active,
+        "hierarchy": _base_model.get_hierarchy() if hasattr(_base_model, "get_hierarchy") else None,
+    }
+
+
+@app.get("/api/agent-studio/catalog")
+async def get_agent_studio_catalog():
+    payload = _build_agent_studio_snapshot()
+    payload["hierarchy"] = _base_model.get_hierarchy() if _base_model else {"tools": [], "submodels": []}
+    return payload
+
+
+@app.post("/api/agent-studio/agents")
+async def create_agent_studio_agent(data: AgentStudioAgentPayload):
+    helpers = _load_agent_studio_helpers()
+    try:
+        saved = helpers["upsert_agent_config"](_model_to_dict(data), create=True)
+    except helpers["AgentStudioError"] as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"status": "success", "agent": saved, "catalog": _build_agent_studio_snapshot()}
+
+
+@app.post("/api/agent-studio/builtin-agents")
+async def create_agent_studio_builtin_agent(data: AgentStudioAgentPayload):
+    helpers = _load_agent_studio_helpers()
+    payload = _model_to_dict(data)
+    payload["type"] = "builtin"
+    try:
+        scaffold = helpers["create_builtin_agent_scaffold"](payload)
+    except helpers["AgentStudioError"] as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    hierarchy = None
+    if _base_model and hasattr(_base_model, "reload_agent_studio"):
+        hierarchy = _base_model.reload_agent_studio()
+    return {
+        "status": "success",
+        "agent": scaffold["agent"],
+        "path": scaffold["path"],
+        "init_path": scaffold["init_path"],
+        "catalog": _build_agent_studio_snapshot(),
+        "hierarchy": hierarchy,
+    }
+
+
+@app.put("/api/agent-studio/agents/{name}")
+async def update_agent_studio_agent(name: str, data: AgentStudioAgentPayload):
+    helpers = _load_agent_studio_helpers()
+    payload = _model_to_dict(data)
+    payload["name"] = name
+    try:
+        saved = helpers["upsert_agent_config"](payload, create=False)
+    except helpers["AgentStudioError"] as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"status": "success", "agent": saved, "catalog": _build_agent_studio_snapshot()}
+
+
+@app.delete("/api/agent-studio/agents/{name}")
+async def delete_agent_studio_agent(name: str):
+    helpers = _load_agent_studio_helpers()
+    try:
+        deleted = helpers["delete_agent_config"](name)
+    except helpers["AgentStudioError"] as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"status": "success", "agent": deleted, "catalog": _build_agent_studio_snapshot()}
+
+
+@app.post("/api/agent-studio/custom-tools")
+async def save_agent_studio_custom_tool(data: AgentStudioCustomToolPayload):
+    helpers = _load_agent_studio_helpers()
+    try:
+        saved = helpers["upsert_custom_tool"](
+            data.name,
+            data.description,
+            data.code,
+            enabled=data.enabled,
+            params_note=data.params_note,
+            env_vars=data.env_vars,
+        )
+    except helpers["AgentStudioError"] as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"status": "success", "custom_tool": saved, "catalog": _build_agent_studio_snapshot()}
+
+
+@app.post("/api/agent-studio/custom-tools/generate")
+async def generate_agent_studio_custom_tool(data: AgentStudioCustomToolGeneratePayload):
+    if not _base_model:
+        raise HTTPException(status_code=503, detail="AI tool uretimi icin BaseModel hazir degil")
+    brief = (data.brief or "").strip()
+    if len(brief) < 8:
+        raise HTTPException(status_code=400, detail="Tool brief'i biraz daha acik olmali")
+
+    helpers = _load_agent_studio_helpers()
+    live_context = _build_tool_generator_live_context(helpers)
+    system_prompt = (
+        "Sen MarketingApp Agent Studio icin Python custom tool yazan kidemli bir muhendissin. "
+        "Sadece JSON obje dondur. Markdown, aciklama metni veya code fence kullanma.\n\n"
+        "Eger tool'u guvenli ve dogru yazmak icin kritik bilgi eksikse tool kodu yazma; soru soran JSON dondur:\n"
+        '{ "needs_input": true, "message": "Kisa aciklama", "questions": ["Soru 1", "Soru 2"] }\n\n'
+        "Bilgi yeterliyse tool JSON semasi:\n"
+        "{\n"
+        '  "name": "kucuk_harf_tool_adi",\n'
+        '  "description": "Panelde gorunecek kisa aciklama",\n'
+        '  "params_note": "{\\"ornek_param\\": \\"ornek\\"}",\n'
+        '  "test_args": {"ornek_param": "ornek"},\n'
+        '  "env_vars": {"API_KEY_ADI": ""},\n'
+        '  "code": "def kucuk_harf_tool_adi(...):\\n    ...\\n"\n'
+        "}\n\n"
+        "Kurallar:\n"
+        "- name regex: ^[a-z][a-z0-9_]{2,63}$\n"
+        "- code ayni isimde tek ana fonksiyon export etmeli.\n"
+        "- Fonksiyon tipi str veya dict dondurmeli.\n"
+        "- Standart kutuphane kullanabilirsin.\n"
+        "- API key gerekiyorsa env_vars icinde BUYUK_HARF_KEY_ADI: \"\" ver ve kodda os.getenv(\"BUYUK_HARF_KEY_ADI\") kullan.\n"
+        "- Kullanici acikca istemedikce dosya sistemi, subprocess, eval/exec, browser veya ilgisiz gizli env okuma kullanma.\n"
+        "- Hata durumlarini try/except ile okunabilir str/dict olarak dondur.\n"
+        "- Kod Turkce kullaniciya uygun, sade ve test edilebilir olsun.\n"
+        "\nCANLI PROJE KATALOGU:\n"
+        f"{live_context}\n"
+    )
+    user_prompt = (
+        f"Kullanici tool istegi:\n{brief}\n\n"
+        f"Mevcut tool adi taslagi: {data.current_name or '(bos)'}\n"
+        f"Mevcut aciklama taslagi: {data.current_description or '(bos)'}\n"
+    )
+    if data.conversation:
+        history = []
+        for item in data.conversation[-8:]:
+            role = (item.get("role") or "user").strip()
+            content = (item.get("content") or "").strip()
+            if content:
+                history.append(f"{role}: {content}")
+        if history:
+            user_prompt += "\nOnceki AI brief konusmasi:\n" + "\n".join(history) + "\n"
+    if data.current_code.strip():
+        user_prompt += f"\nMevcut kod taslagi:\n{data.current_code[:3000]}\n"
+
+    fallback_name = _slug_tool_name(data.current_name or brief, "ai_custom_tool")
+    raw_attempts: list[str] = []
+    tool_generator_model = get_tool_generator_model_name()
+    tool_generator_reasoning_effort = get_tool_generator_reasoning_effort()
+    try:
+        create_kwargs = {
+            "model": tool_generator_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        if tool_generator_reasoning_effort:
+            create_kwargs["reasoning_effort"] = tool_generator_reasoning_effort
+        completion = await _base_model._client.chat.completions.create(**create_kwargs)
+        raw_text = completion.choices[0].message.content or ""
+        raw_attempts.append(raw_text)
+    except Exception:
+        try:
+            fallback_kwargs = {
+                "model": tool_generator_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            }
+            if tool_generator_reasoning_effort:
+                fallback_kwargs["reasoning_effort"] = tool_generator_reasoning_effort
+            completion = await _base_model._client.chat.completions.create(**fallback_kwargs)
+            raw_text = completion.choices[0].message.content or ""
+            raw_attempts.append(raw_text)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"AI tool uretimi basarisiz: {exc}")
+
+    validation_error = None
+    try:
+        parsed_payload = _extract_json_object(raw_text)
+        if parsed_payload.get("needs_input"):
+            questions = parsed_payload.get("questions") if isinstance(parsed_payload.get("questions"), list) else []
+            return {
+                "status": "needs_input",
+                "message": str(parsed_payload.get("message") or "Tool'u netlestirmek icin birkaç bilgi lazim."),
+                "questions": [str(item) for item in questions],
+            }
+        generated = _validate_generated_tool_payload(
+            parsed_payload,
+            helpers["validate_tool_name"],
+            fallback_name=fallback_name,
+        )
+    except Exception as exc:
+        validation_error = exc
+        repair_prompt = (
+            "Asagidaki model cevabini gecerli JSON objesine cevir. Sadece JSON dondur. "
+            "Kod string'i JSON icinde dogru escape edilmeli. name regex'e uymali ve code ayni isimde fonksiyon tanimlamali.\n\n"
+            f"Beklenen fallback name: {fallback_name}\n"
+            f"Orijinal brief:\n{brief}\n\n"
+            f"Bozuk cevap:\n{raw_text[:7000]}"
+        )
+        try:
+            repair_kwargs = {
+                "model": tool_generator_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": repair_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+            }
+            if tool_generator_reasoning_effort:
+                repair_kwargs["reasoning_effort"] = tool_generator_reasoning_effort
+            completion = await _base_model._client.chat.completions.create(**repair_kwargs)
+            repaired_text = completion.choices[0].message.content or ""
+            raw_attempts.append(repaired_text)
+            parsed_repaired = _extract_json_object(repaired_text)
+            if parsed_repaired.get("needs_input"):
+                questions = parsed_repaired.get("questions") if isinstance(parsed_repaired.get("questions"), list) else []
+                return {
+                    "status": "needs_input",
+                    "message": str(parsed_repaired.get("message") or "Tool'u netlestirmek icin birkaç bilgi lazim."),
+                    "questions": [str(item) for item in questions],
+                }
+            generated = _validate_generated_tool_payload(
+                parsed_repaired,
+                helpers["validate_tool_name"],
+                fallback_name=fallback_name,
+            )
+        except Exception as repair_exc:
+            generated = _fallback_generated_tool_payload(brief, helpers["validate_tool_name"])
+            generated["warning"] = (
+                "AI ciktisi otomatik dogrulanamadi; guvenli iskelet tool dolduruldu. "
+                f"Ilk hata: {validation_error}. Onarim hatasi: {repair_exc}"
+            )
+            generated["raw_preview"] = (raw_attempts[-1] if raw_attempts else raw_text)[:1200]
+
+    if _base_model and hasattr(_base_model, "log_message"):
+        _base_model.log_message("sistem", f"AI custom tool taslagi uretildi: {generated['name']}")
+
+    return {"status": "success", "tool": generated}
+
+
+@app.post("/api/agent-studio/custom-tools/{name}/test")
+async def test_agent_studio_custom_tool(name: str, data: AgentStudioCustomToolTestPayload):
+    helpers = _load_agent_studio_helpers()
+    config = helpers["load_custom_tools_config"]()
+    entry = next((item for item in config.get("custom_tools", []) if item.get("name") == name), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Custom tool bulunamadi")
+
+    func, error = helpers["load_custom_tool_callable"](entry, include_disabled=True)
+    if error or not func:
+        raise HTTPException(status_code=400, detail=error or "Custom tool yuklenemedi")
+
+    args = data.arguments or {}
+    if not isinstance(args, dict):
+        raise HTTPException(status_code=400, detail="arguments dict olmali")
+    coerced_args = _coerce_custom_tool_args(func, args)
+
+    try:
+        if inspect.iscoroutinefunction(func):
+            result = await asyncio.wait_for(func(**coerced_args), timeout=20)
+        else:
+            result = await asyncio.wait_for(asyncio.to_thread(func, **coerced_args), timeout=20)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Custom tool test zaman asimina ugradi")
+    except TypeError as exc:
+        raise HTTPException(status_code=400, detail=f"Arguman hatasi: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Custom tool hatasi: {exc}. Kullanilan argumanlar: {coerced_args}")
+
+    return {"status": "success", "name": name, "arguments": coerced_args, "result": _json_safe_result(result)}
+
+
+@app.post("/api/agent-studio/reload")
+async def reload_agent_studio_runtime():
+    hierarchy = None
+    if _base_model and hasattr(_base_model, "reload_agent_studio"):
+        hierarchy = _base_model.reload_agent_studio()
+    return {
+        "status": "success",
+        "hierarchy": hierarchy,
+        "catalog": _build_agent_studio_snapshot(),
+        "restart_required": _base_model is None,
+    }
 
 
 @app.get("/api/env")

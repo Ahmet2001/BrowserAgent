@@ -1,9 +1,9 @@
 from .base import (
-    SubModel, 
-    SubModelRateLimitError, 
-    register_submodel, 
-    get_submodel, 
-    list_submodels, 
+    SubModel,
+    SubModelRateLimitError,
+    register_submodel,
+    get_submodel,
+    list_submodels,
     get_all_submodels
 )
 
@@ -11,3 +11,4 @@ from .base import (
 from . import browser_agent
 from . import content_creator_agent
 from . import sosyal_medya_agent
+from . import computer  # Agent Studio builtin

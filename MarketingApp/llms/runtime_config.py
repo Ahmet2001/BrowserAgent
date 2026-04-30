@@ -16,8 +16,10 @@ _DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/ope
 _DEFAULT_MOONSHOT_BASE_URL = "https://api.moonshot.ai/v1"
 _DEFAULT_BASE_MODEL = "gemini-3.1-flash-lite-preview"
 _DEFAULT_BROWSER_MODEL = "gemini-3.1-flash-lite-preview"
+_DEFAULT_TOOL_GENERATOR_MODEL = "gemini-3.1-flash-lite-preview"
 _DEFAULT_BASE_REASONING_EFFORT = "low"
 _DEFAULT_BROWSER_REASONING_EFFORT = "low"
+_DEFAULT_TOOL_GENERATOR_REASONING_EFFORT = "low"
 
 
 def model_supports_reasoning_effort(model_name: str | None) -> bool:
@@ -87,6 +89,10 @@ def get_browser_model_name() -> str:
     return os.getenv("BROWSER_AGENT_MODEL") or _DEFAULT_BROWSER_MODEL
 
 
+def get_tool_generator_model_name() -> str:
+    return os.getenv("TOOL_GENERATOR_MODEL") or _DEFAULT_TOOL_GENERATOR_MODEL
+
+
 def get_base_reasoning_effort() -> str | None:
     if not model_supports_reasoning_effort(get_base_model_name()):
         return None
@@ -106,4 +112,15 @@ def get_browser_reasoning_effort() -> str | None:
         return explicit_value
     if get_model_provider() == "gemini":
         return _DEFAULT_BROWSER_REASONING_EFFORT
+    return None
+
+
+def get_tool_generator_reasoning_effort() -> str | None:
+    if not model_supports_reasoning_effort(get_tool_generator_model_name()):
+        return None
+    explicit_value = os.getenv("TOOL_GENERATOR_REASONING_EFFORT")
+    if explicit_value:
+        return explicit_value
+    if get_tool_generator_model_name().lower().startswith("gemini-"):
+        return _DEFAULT_TOOL_GENERATOR_REASONING_EFFORT
     return None

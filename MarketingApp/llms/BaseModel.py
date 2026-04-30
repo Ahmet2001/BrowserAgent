@@ -24,7 +24,7 @@ from .runtime_config import (
     get_openai_compat_base_url,
     get_provider_display_name,
 )
-from MarketingApp.araclar import BASE_ARACLAR, BROWSER_ARACLARI
+from MarketingApp.araclar import BASE_ARACLAR
 
 
 INPUT_RATE = 16000
@@ -76,43 +76,140 @@ class BaseModel:
         )
         self._current_image = None
 
-        _allowed = {"sosyal_medya_agent", "content_creator_agent"}
-        if BROWSER_ARACLARI:
-            _allowed.add("browser_agent")
-        submodels = [sm for sm in get_all_submodels() if sm.name in _allowed]
-        self.submodels = submodels
-        self._submodel_funcs, self._submodel_func_map = self._build_submodel_functions(submodels)
-
-        self.active_agents = {sm.name: True for sm in submodels}
-        self.active_tools = {}
         self.logs = []
         self.metrics = []
         self.pending_actions = {}
         self.start_time = time.time()
         self._provider_blocked_until = 0.0
         self._provider_block_message = ""
+        self.agent_configs = []
+        self.agent_config_by_name = {}
+        self.agent_studio_errors = []
+        self._agent_original_tools = {}
+        self._runtime_tool_map = {}
 
-        from MarketingApp.araclar import (
-            ARAMA_ARACLARI,
-            CONTENT_CREATOR_ARACLARI,
-            KOD_ARACLARI,
-            SISTEM_ARACLARI,
-            VLM_ARACLARI,
-        )
-
-        all_tool_lists = [BASE_ARACLAR, SISTEM_ARACLARI, ARAMA_ARACLARI, KOD_ARACLARI, VLM_ARACLARI, CONTENT_CREATOR_ARACLARI, BROWSER_ARACLARI]
-        for tool_list in all_tool_lists:
-            for func in tool_list:
-                self.active_tools[func.__name__] = True
-
-        for func in self._submodel_func_map.values():
-            self.active_tools[func.__name__] = True
+        self._configure_agent_runtime()
 
         print(f"🧠 BaseModel başlatıldı: {self.model}")
         print(f"   Sağlayıcı: {self.provider_name}")
         if self.reasoning_effort:
             print(f"   Reasoning effort: {self.reasoning_effort}")
         print(f"   SubModel tool'ları: {[f.__name__ for f in self._submodel_funcs]}")
+
+    def _configure_agent_runtime(self):
+        from .SubModels.generic_config_agent import GenericConfigAgent
+        from .agent_studio import import_scaffolded_builtin_submodels, load_agents_config, load_available_tools
+
+        import_scaffolded_builtin_submodels()
+        agents_config = load_agents_config()
+        available_tools = load_available_tools(include_custom=True)
+        tool_map = dict(available_tools["tools"])
+        disabled_tools = set(agents_config.get("global_disabled_tools") or [])
+        registered_submodels = {sm.name: sm for sm in get_all_submodels()}
+
+        submodels = []
+        original_tools = {}
+        errors = list(agents_config.get("errors") or []) + list(available_tools.get("errors") or [])
+
+        def resolve_tools_for_names(agent_name: str, tool_names: list[str]) -> tuple[list, list[str]]:
+            selected_tools = []
+            missing_tools = []
+            seen_tools = set()
+            for tool_name in tool_names:
+                if tool_name not in tool_map:
+                    missing_tools.append(tool_name)
+                    continue
+                if tool_name in seen_tools:
+                    continue
+                selected_tools.append(tool_map[tool_name])
+                seen_tools.add(tool_name)
+            return selected_tools, missing_tools
+
+        def builtin_tool_names(agent_name: str) -> list[str]:
+            return [
+                tool_name
+                for tool_name, groups in available_tools.get("groups", {}).items()
+                if agent_name in groups
+            ]
+
+        for config in agents_config["agents"]:
+            name = config["name"]
+            if config.get("type") == "builtin":
+                submodel = registered_submodels.get(name)
+                if not submodel:
+                    errors.append({"scope": "agents", "name": name, "message": "Builtin submodel registry'de bulunamadi."})
+                    continue
+                if config.get("description"):
+                    submodel.description = config["description"]
+                configured_model = str(config.get("model") or "").strip()
+                if configured_model and configured_model not in {"default", "base_default", "browser_default"}:
+                    submodel.model_id = configured_model
+                selected_names = config.get("tools") or []
+                if config.get("tool_mode") != "custom":
+                    selected_names = builtin_tool_names(name)
+                selected_tools, missing_tools = resolve_tools_for_names(name, selected_names)
+                if missing_tools:
+                    errors.append(
+                        {
+                            "scope": "agents",
+                            "name": name,
+                            "message": f"Bilinmeyen tool atlandi: {', '.join(missing_tools)}",
+                        }
+                    )
+                submodels.append(submodel)
+                original_tools[name] = list(selected_tools)
+                continue
+
+            selected_tools, missing_tools = resolve_tools_for_names(name, config.get("tools") or [])
+
+            if missing_tools:
+                errors.append(
+                    {
+                        "scope": "agents",
+                        "name": name,
+                        "message": f"Bilinmeyen tool atlandi: {', '.join(missing_tools)}",
+                    }
+                )
+
+            submodel = GenericConfigAgent(config, selected_tools)
+            submodels.append(submodel)
+            original_tools[name] = list(selected_tools)
+
+        self.submodels = submodels
+        self.agent_configs = agents_config["agents"]
+        self.agent_config_by_name = {item["name"]: item for item in self.agent_configs}
+        self.agent_studio_errors = errors
+        self._agent_original_tools = original_tools
+        self._runtime_tool_map = tool_map
+        self._submodel_funcs, self._submodel_func_map = self._build_submodel_functions(submodels)
+        self.active_agents = {
+            sm.name: bool(self.agent_config_by_name.get(sm.name, {}).get("enabled", True))
+            for sm in submodels
+        }
+        self.active_tools = {
+            name: name not in disabled_tools
+            for name in tool_map
+        }
+        for func in self._submodel_func_map.values():
+            self.active_tools[func.__name__] = bool(self.active_agents.get(func.__name__, True))
+
+        self._apply_tool_activation_to_submodels()
+
+    def _apply_tool_activation_to_submodels(self):
+        for submodel in getattr(self, "submodels", []):
+            original_tools = self._agent_original_tools.get(submodel.name, list(submodel.tools))
+            filtered_tools = [
+                func
+                for func in original_tools
+                if self.active_tools.get(func.__name__, True)
+            ]
+            submodel.tools = filtered_tools
+            submodel._tool_map = {func.__name__: func for func in filtered_tools}
+
+    def reload_agent_studio(self) -> dict:
+        self._configure_agent_runtime()
+        self.log_message("sistem", "Agent Studio config ve custom tool katalogu yeniden yuklendi.")
+        return self.get_hierarchy()
 
     def _strip_thought_blocks(self, text: str) -> str:
         cleaned = re.sub(r"<thought>.*?</thought>", "", text or "", flags=re.DOTALL | re.IGNORECASE)
@@ -260,6 +357,14 @@ class BaseModel:
         if name not in self.active_agents:
             raise KeyError(name)
         self.active_agents[name] = bool(active)
+        if name in self._submodel_func_map:
+            self.active_tools[name] = bool(active)
+        try:
+            from .agent_studio import set_agent_enabled
+
+            set_agent_enabled(name, bool(active))
+        except Exception as exc:
+            self.agent_studio_errors.append({"scope": "agents", "name": name, "message": str(exc)})
         state_label = "aktif" if self.active_agents[name] else "pasif"
         self.log_message("sistem", f"Alt ajan durumu guncellendi: {name} -> {state_label}")
         return self.active_agents[name]
@@ -268,6 +373,28 @@ class BaseModel:
         if name not in self.active_agents:
             raise KeyError(name)
         return self.set_agent_active(name, not self.active_agents[name])
+
+    def set_tool_active(self, name: str, active: bool) -> bool:
+        if name not in self.active_tools:
+            raise KeyError(name)
+        self.active_tools[name] = bool(active)
+        if name in self.active_agents:
+            self.active_agents[name] = bool(active)
+        try:
+            from .agent_studio import set_global_tool_active
+
+            set_global_tool_active(name, bool(active))
+        except Exception as exc:
+            self.agent_studio_errors.append({"scope": "tools", "name": name, "message": str(exc)})
+        self._apply_tool_activation_to_submodels()
+        state_label = "aktif" if self.active_tools[name] else "pasif"
+        self.log_message("sistem", f"Tool durumu guncellendi: {name} -> {state_label}")
+        return self.active_tools[name]
+
+    def toggle_tool(self, name: str) -> bool:
+        if name not in self.active_tools:
+            raise KeyError(name)
+        return self.set_tool_active(name, not self.active_tools[name])
 
     def get_hierarchy(self) -> dict:
         from MarketingApp.araclar import BASE_ARACLAR
@@ -287,13 +414,17 @@ class BaseModel:
         }
 
         for sm in self.submodels:
+            original_tools = self._agent_original_tools.get(sm.name, list(sm.tools))
+            config = self.agent_config_by_name.get(sm.name, {})
             hierarchy["submodels"].append({
                 "name": sm.name,
                 "desc": sm.description,
                 "model": sm.model_id,
+                "type": config.get("type") or "builtin",
+                "tool_mode": config.get("tool_mode") or "default",
                 "active": self.active_agents.get(sm.name, True),
-                "tool_count": len(sm.tools),
-                "tools": tool_info(sm.tools),
+                "tool_count": len(original_tools),
+                "tools": tool_info(original_tools),
             })
 
         return hierarchy

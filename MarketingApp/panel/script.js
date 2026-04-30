@@ -45,6 +45,16 @@ document.addEventListener("DOMContentLoaded", () => {
             content: "",
             loaded: false,
         },
+        agentStudio: {
+            catalog: null,
+            selectedAgentName: null,
+            selectedCustomToolName: null,
+            toolSearch: "",
+            editorDirty: false,
+            customDirty: false,
+            aiToolMessages: [],
+            selectedToolNames: new Set(),
+        },
     };
 
     const dom = {
@@ -160,6 +170,36 @@ document.addEventListener("DOMContentLoaded", () => {
         socialSaveDraft: document.getElementById("social-save-draft"),
         socialSkipItem: document.getElementById("social-skip-item"),
         socialSendReply: document.getElementById("social-send-reply"),
+        agentStudioRefresh: document.getElementById("agent-studio-refresh"),
+        agentStudioReloadRuntime: document.getElementById("agent-studio-reload-runtime"),
+        agentStudioNewAgent: document.getElementById("agent-studio-new-agent"),
+        agentStudioSaveAgent: document.getElementById("agent-studio-save-agent"),
+        agentStudioDeleteAgent: document.getElementById("agent-studio-delete-agent"),
+        agentStudioAgentList: document.getElementById("agent-studio-agent-list"),
+        agentStudioErrors: document.getElementById("agent-studio-errors"),
+        agentStudioName: document.getElementById("agent-studio-name"),
+        agentStudioType: document.getElementById("agent-studio-type"),
+        agentStudioModel: document.getElementById("agent-studio-model"),
+        agentStudioEnabled: document.getElementById("agent-studio-enabled"),
+        agentStudioDescription: document.getElementById("agent-studio-description"),
+        agentStudioPrompt: document.getElementById("agent-studio-prompt"),
+        agentStudioToolSearch: document.getElementById("agent-studio-tool-search"),
+        agentStudioToolList: document.getElementById("agent-studio-tool-list"),
+        customToolNew: document.getElementById("custom-tool-new"),
+        customToolSave: document.getElementById("custom-tool-save"),
+        customToolList: document.getElementById("custom-tool-list"),
+        customToolAiBrief: document.getElementById("custom-tool-ai-brief"),
+        customToolAiGenerate: document.getElementById("custom-tool-ai-generate"),
+        customToolAiConversation: document.getElementById("custom-tool-ai-conversation"),
+        customToolName: document.getElementById("custom-tool-name"),
+        customToolEnabled: document.getElementById("custom-tool-enabled"),
+        customToolDescription: document.getElementById("custom-tool-description"),
+        customToolParamsNote: document.getElementById("custom-tool-params-note"),
+        customToolEnvVars: document.getElementById("custom-tool-env-vars"),
+        customToolCode: document.getElementById("custom-tool-code"),
+        customToolTestArgs: document.getElementById("custom-tool-test-args"),
+        customToolTest: document.getElementById("custom-tool-test"),
+        customToolTestResult: document.getElementById("custom-tool-test-result"),
         statsChart: document.getElementById("stats-chart"),
         toastRegion: document.getElementById("toast-region"),
     };
@@ -360,6 +400,95 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
             selectSocialItem(item.dataset.socialQueueId);
+        });
+
+        dom.agentStudioRefresh.addEventListener("click", async () => {
+            await fetchAgentStudioCatalog({ silent: false });
+            toast("Agent Studio kataloğu yenilendi.", "success");
+        });
+        dom.agentStudioReloadRuntime.addEventListener("click", reloadAgentStudioRuntime);
+        dom.agentStudioNewAgent.addEventListener("click", () => {
+            state.agentStudio.selectedAgentName = "__new__";
+            state.agentStudio.editorDirty = false;
+            renderAgentStudioEditor(null, true);
+            renderAgentStudioToolList(null);
+        });
+        dom.agentStudioSaveAgent.addEventListener("click", saveAgentStudioAgent);
+        dom.agentStudioDeleteAgent.addEventListener("click", deleteAgentStudioAgent);
+        dom.agentStudioToolSearch.addEventListener("input", () => {
+            state.agentStudio.toolSearch = dom.agentStudioToolSearch.value.trim().toLowerCase();
+            const agent = getSelectedStudioAgent();
+            renderAgentStudioToolList(agent);
+        });
+        [
+            dom.agentStudioName,
+            dom.agentStudioType,
+            dom.agentStudioModel,
+            dom.agentStudioEnabled,
+            dom.agentStudioDescription,
+            dom.agentStudioPrompt,
+        ].forEach((input) => {
+            input.addEventListener("input", () => {
+                state.agentStudio.editorDirty = true;
+                if (input === dom.agentStudioType) {
+                    renderAgentStudioToolList(getSelectedStudioAgent());
+                }
+            });
+            input.addEventListener("change", () => {
+                state.agentStudio.editorDirty = true;
+                if (input === dom.agentStudioType) {
+                    renderAgentStudioToolList(getSelectedStudioAgent());
+                }
+            });
+        });
+        dom.agentStudioAgentList.addEventListener("click", (event) => {
+            const item = event.target.closest("[data-agent-studio-select]");
+            if (!item) {
+                return;
+            }
+            selectAgentStudioAgent(item.dataset.agentStudioSelect);
+        });
+        dom.agentStudioToolList.addEventListener("change", (event) => {
+            if (event.target.matches("input[type='checkbox']")) {
+                if (event.target.checked) {
+                    state.agentStudio.selectedToolNames.add(event.target.value);
+                } else {
+                    state.agentStudio.selectedToolNames.delete(event.target.value);
+                }
+                state.agentStudio.editorDirty = true;
+            }
+        });
+        dom.customToolNew.addEventListener("click", () => {
+            state.agentStudio.selectedCustomToolName = "__new__";
+            state.agentStudio.customDirty = false;
+            renderCustomToolEditor(null, true);
+        });
+        dom.customToolAiGenerate.addEventListener("click", generateCustomToolWithAi);
+        dom.customToolSave.addEventListener("click", saveCustomTool);
+        dom.customToolTest.addEventListener("click", testCustomTool);
+        dom.customToolList.addEventListener("click", (event) => {
+            const item = event.target.closest("[data-custom-tool-select]");
+            if (!item) {
+                return;
+            }
+            selectCustomTool(item.dataset.customToolSelect);
+        });
+        [
+            dom.customToolName,
+            dom.customToolEnabled,
+            dom.customToolDescription,
+            dom.customToolParamsNote,
+            dom.customToolAiBrief,
+            dom.customToolEnvVars,
+            dom.customToolCode,
+            dom.customToolTestArgs,
+        ].forEach((input) => {
+            input.addEventListener("input", () => {
+                state.agentStudio.customDirty = true;
+            });
+            input.addEventListener("change", () => {
+                state.agentStudio.customDirty = true;
+            });
         });
 
         dom.fileTree.addEventListener("click", async (event) => {
@@ -582,6 +711,9 @@ document.addEventListener("DOMContentLoaded", () => {
             await fetchHeartbeatConfig({ silent: true });
             await fetchSocialSnapshot({ silent: true });
         }
+        if (state.activeTab === "agent-studio") {
+            await fetchAgentStudioCatalog({ silent: true });
+        }
     }
 
     async function fetchBootstrap({ silent = false } = {}) {
@@ -599,6 +731,7 @@ document.addEventListener("DOMContentLoaded", () => {
         };
         state.social.browser = payload.social?.browser || null;
         state.social.queue = payload.social?.queue || { items: [] };
+        state.agentStudio.catalog = payload.agent_studio || state.agentStudio.catalog;
 
         if (!state.heartbeatDirty && payload.heartbeat && typeof payload.heartbeat.content === "string") {
             dom.heartbeatEditor.value = payload.heartbeat.content;
@@ -613,6 +746,7 @@ document.addEventListener("DOMContentLoaded", () => {
         renderSkills(payload.skills);
         renderHeartbeat();
         renderSocial(payload.social || { browser: null, queue: { items: [] } });
+        renderAgentStudio();
         markSync();
 
         if (!silent) {
@@ -759,6 +893,558 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         toast("Tool durumu güncellendi.", "success");
         await fetchBootstrap({ silent: true });
+    }
+
+    function getStudioCatalog() {
+        return state.agentStudio.catalog || {
+            agents: [],
+            tools: [],
+            custom_tools: [],
+            errors: [],
+            recommended_memory_tools: [],
+        };
+    }
+
+    function getSelectedStudioAgent() {
+        const catalog = getStudioCatalog();
+        if (!state.agentStudio.selectedAgentName || state.agentStudio.selectedAgentName === "__new__") {
+            return null;
+        }
+        return (catalog.agents || []).find((agent) => agent.name === state.agentStudio.selectedAgentName) || null;
+    }
+
+    function getSelectedCustomTool() {
+        const catalog = getStudioCatalog();
+        if (!state.agentStudio.selectedCustomToolName || state.agentStudio.selectedCustomToolName === "__new__") {
+            return null;
+        }
+        return (catalog.custom_tools || []).find((tool) => tool.name === state.agentStudio.selectedCustomToolName) || null;
+    }
+
+    async function fetchAgentStudioCatalog({ silent = false } = {}) {
+        const payload = await apiRequest("/agent-studio/catalog");
+        state.agentStudio.catalog = payload;
+        renderAgentStudio();
+        if (!silent) {
+            setConnectionState("Agent Studio kataloğu senkronize edildi.", "success");
+        }
+        return payload;
+    }
+
+    function renderAgentStudio() {
+        const catalog = getStudioCatalog();
+        const agents = catalog.agents || [];
+        const customTools = catalog.custom_tools || [];
+
+        if (!state.agentStudio.selectedAgentName && !state.agentStudio.editorDirty && agents.length > 0) {
+            state.agentStudio.selectedAgentName = agents[0].name;
+        }
+        if (!state.agentStudio.selectedCustomToolName && !state.agentStudio.customDirty && customTools.length > 0) {
+            state.agentStudio.selectedCustomToolName = customTools[0].name;
+        }
+
+        renderAgentStudioAgentList(catalog);
+        renderAgentStudioErrors(catalog.errors || []);
+
+        const selectedAgent = getSelectedStudioAgent();
+        if (!state.agentStudio.editorDirty) {
+            renderAgentStudioEditor(selectedAgent, false);
+        } else {
+            renderAgentStudioToolList(selectedAgent);
+        }
+
+        renderCustomToolList(catalog);
+        const selectedCustomTool = getSelectedCustomTool();
+        if (!state.agentStudio.customDirty) {
+            renderCustomToolEditor(selectedCustomTool, false);
+        }
+    }
+
+    function renderAgentStudioAgentList(catalog) {
+        const agents = catalog.agents || [];
+        dom.agentStudioAgentList.innerHTML = "";
+        if (agents.length === 0) {
+            dom.agentStudioAgentList.innerHTML = '<div class="empty-copy">Agent config bulunamadı.</div>';
+            return;
+        }
+
+        agents.forEach((agent) => {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = `studio-list-item ${state.agentStudio.selectedAgentName === agent.name ? "is-selected" : ""}`;
+            row.dataset.agentStudioSelect = agent.name;
+
+            const content = document.createElement("div");
+            const title = document.createElement("strong");
+            title.textContent = agent.name;
+            const meta = document.createElement("p");
+            const parts = [agent.type || "config", agent.enabled ? "aktif" : "pasif"];
+            if (agent.model) {
+                parts.push(agent.model);
+            }
+            parts.push(`${agentSelectedToolNames(agent, catalog).length} tool`);
+            meta.textContent = parts.join(" • ");
+            content.append(title, meta);
+
+            const badge = document.createElement("span");
+            badge.className = `risk-badge ${agent.type === "builtin" ? "risk-medium" : "risk-low"}`;
+            badge.textContent = agent.type || "config";
+            row.append(content, badge);
+            dom.agentStudioAgentList.appendChild(row);
+        });
+    }
+
+    function renderAgentStudioErrors(errors) {
+        dom.agentStudioErrors.innerHTML = "";
+        const visibleErrors = (errors || []).slice(0, 8);
+        if (visibleErrors.length === 0) {
+            return;
+        }
+        visibleErrors.forEach((error) => {
+            const item = document.createElement("div");
+            item.className = "studio-error";
+            const scope = error.scope || "agent_studio";
+            const name = error.name ? `:${error.name}` : "";
+            item.textContent = `${scope}${name} • ${error.message || error}`;
+            dom.agentStudioErrors.appendChild(item);
+        });
+    }
+
+    function renderAgentStudioEditor(agent, force = false) {
+        if (state.agentStudio.editorDirty && !force) {
+            return;
+        }
+        const isNew = !agent;
+        const initialTools = agent
+            ? agentSelectedToolNames(agent, getStudioCatalog())
+            : getStudioCatalog().recommended_memory_tools || [];
+        const promptPlaceholder = agent?.system_prompt_placeholder
+            || getStudioCatalog().default_config_system_prompt_placeholder
+            || "Agent rolünü ve çalışma kurallarını yaz...";
+        state.agentStudio.selectedToolNames = new Set(initialTools);
+        dom.agentStudioName.value = agent?.name || "";
+        dom.agentStudioName.disabled = !isNew;
+        dom.agentStudioType.value = agent?.type || "config";
+        dom.agentStudioType.disabled = !isNew;
+        dom.agentStudioModel.value = agent?.model || "default";
+        dom.agentStudioEnabled.checked = agent?.enabled ?? true;
+        dom.agentStudioDescription.value = agent?.description || "";
+        dom.agentStudioPrompt.value = agent?.system_prompt || "";
+        dom.agentStudioPrompt.placeholder = promptPlaceholder;
+        dom.agentStudioDeleteAgent.disabled = isNew || agent?.type === "builtin";
+        renderAgentStudioToolList(agent);
+    }
+
+    function currentCheckedStudioTools() {
+        return new Set(state.agentStudio.selectedToolNames || []);
+    }
+
+    function agentSelectedToolNames(agent, catalog = getStudioCatalog()) {
+        if (!agent) {
+            return [];
+        }
+        if (agent.type === "builtin") {
+            if (agent.tool_mode === "custom") {
+                return agent.tools || [];
+            }
+            return (catalog.tools || [])
+                .filter((tool) => (tool.groups || []).includes(agent.name))
+                .map((tool) => tool.name);
+        }
+        return agent.tools || [];
+    }
+
+    function renderAgentStudioToolList(agent) {
+        const catalog = getStudioCatalog();
+        const query = state.agentStudio.toolSearch;
+        const recommended = new Set(catalog.recommended_memory_tools || []);
+        let selected = currentCheckedStudioTools();
+        if (!state.agentStudio.editorDirty && agent) {
+            selected = new Set(agentSelectedToolNames(agent, catalog));
+            state.agentStudio.selectedToolNames = new Set(selected);
+        } else if (!agent && selected.size === 0) {
+            selected = new Set(recommended);
+            state.agentStudio.selectedToolNames = new Set(selected);
+        }
+
+        const tools = (catalog.tools || []).filter((tool) => {
+            if (!query) {
+                return true;
+            }
+            return `${tool.name} ${tool.description || ""} ${tool.category || ""}`.toLowerCase().includes(query);
+        });
+
+        dom.agentStudioToolList.innerHTML = "";
+        if (tools.length === 0) {
+            dom.agentStudioToolList.innerHTML = '<div class="empty-copy">Filtreye uygun tool yok.</div>';
+            return;
+        }
+
+        tools.forEach((tool) => {
+            const label = document.createElement("label");
+            label.className = `tool-check risk-${tool.risk || "low"} ${tool.active ? "" : "is-inactive"}`;
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.value = tool.name;
+            checkbox.checked = selected.has(tool.name);
+            checkbox.disabled = !tool.active;
+
+            const text = document.createElement("span");
+            const name = document.createElement("strong");
+            name.textContent = tool.name;
+            const meta = document.createElement("small");
+            const metaParts = [tool.category || "tool", tool.risk || "low"];
+            if (tool.source === "custom") {
+                metaParts.push("custom");
+            }
+            if (tool.recommended) {
+                metaParts.push("önerilen hafıza");
+            }
+            meta.textContent = metaParts.join(" • ");
+            text.append(name, meta);
+
+            label.append(checkbox, text);
+            if (tool.description) {
+                label.title = tool.description;
+            }
+            dom.agentStudioToolList.appendChild(label);
+        });
+    }
+
+    function selectAgentStudioAgent(name) {
+        state.agentStudio.selectedAgentName = name;
+        state.agentStudio.editorDirty = false;
+        const agent = getSelectedStudioAgent();
+        renderAgentStudioEditor(agent, true);
+        renderAgentStudio();
+    }
+
+    function collectAgentStudioPayload() {
+        return {
+            name: dom.agentStudioName.value.trim(),
+            type: dom.agentStudioType.value || "config",
+            enabled: dom.agentStudioEnabled.checked,
+            description: dom.agentStudioDescription.value.trim(),
+            model: dom.agentStudioModel.value.trim() || "default",
+            tool_mode: "custom",
+            system_prompt: dom.agentStudioPrompt.value,
+            tools: [...currentCheckedStudioTools()],
+        };
+    }
+
+    async function saveAgentStudioAgent() {
+        const payload = collectAgentStudioPayload();
+        if (!payload.name) {
+            toast("Agent adı boş olamaz.", "error");
+            return;
+        }
+        const isNew = state.agentStudio.selectedAgentName === "__new__" || !getSelectedStudioAgent();
+        const path = isNew && payload.type === "builtin"
+            ? "/agent-studio/builtin-agents"
+            : isNew
+                ? "/agent-studio/agents"
+                : `/agent-studio/agents/${encodeURIComponent(state.agentStudio.selectedAgentName)}`;
+        const method = isNew ? "POST" : "PUT";
+        try {
+            const result = await apiRequest(path, { method, body: payload, timeout: 20000 });
+            state.agentStudio.catalog = result.catalog || state.agentStudio.catalog;
+            if (result.hierarchy) {
+                state.hierarchy = result.hierarchy;
+                renderHierarchy(result.hierarchy);
+            }
+            state.agentStudio.selectedAgentName = payload.name;
+            state.agentStudio.editorDirty = false;
+            renderAgentStudio();
+            toast(payload.type === "builtin" && isNew ? "Builtin submodel oluşturuldu ve yüklendi." : "Agent config kaydedildi.", "success");
+        } catch (error) {
+            toast(`Agent kaydedilemedi: ${error.message}`, "error");
+        }
+    }
+
+    async function deleteAgentStudioAgent() {
+        const agent = getSelectedStudioAgent();
+        if (!agent) {
+            return;
+        }
+        if (agent.type === "builtin") {
+            toast("Builtin agent silinemez; pasife alabilirsin.", "error");
+            return;
+        }
+        if (!window.confirm(`${agent.name} silinsin mi?`)) {
+            return;
+        }
+        try {
+            const result = await apiRequest(`/agent-studio/agents/${encodeURIComponent(agent.name)}`, {
+                method: "DELETE",
+                timeout: 20000,
+            });
+            state.agentStudio.catalog = result.catalog || state.agentStudio.catalog;
+            state.agentStudio.selectedAgentName = null;
+            state.agentStudio.editorDirty = false;
+            renderAgentStudio();
+            toast("Agent silindi.", "success");
+        } catch (error) {
+            toast(`Agent silinemedi: ${error.message}`, "error");
+        }
+    }
+
+    async function reloadAgentStudioRuntime() {
+        try {
+            const result = await apiRequest("/agent-studio/reload", { method: "POST", timeout: 30000 });
+            state.agentStudio.catalog = result.catalog || state.agentStudio.catalog;
+            if (result.hierarchy) {
+                state.hierarchy = result.hierarchy;
+                renderHierarchy(result.hierarchy);
+            }
+            renderAgentStudio();
+            toast(result.restart_required ? "Config kaydedildi; uygulama restart bekliyor." : "Agent runtime yeniden yüklendi.", "success");
+        } catch (error) {
+            toast(`Agent runtime yenilenemedi: ${error.message}`, "error");
+        }
+    }
+
+    function renderCustomToolList(catalog) {
+        const tools = catalog.custom_tools || [];
+        dom.customToolList.innerHTML = "";
+        if (tools.length === 0) {
+            dom.customToolList.innerHTML = '<div class="empty-copy">Custom tool yok.</div>';
+            return;
+        }
+        tools.forEach((tool) => {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = `studio-list-item ${state.agentStudio.selectedCustomToolName === tool.name ? "is-selected" : ""}`;
+            row.dataset.customToolSelect = tool.name;
+
+            const content = document.createElement("div");
+            const title = document.createElement("strong");
+            title.textContent = tool.name;
+            const meta = document.createElement("p");
+            meta.textContent = [tool.enabled ? "aktif" : "pasif", tool.error ? "hata" : "hazır"].join(" • ");
+            content.append(title, meta);
+
+            const badge = document.createElement("span");
+            badge.className = `risk-badge ${tool.error ? "risk-high" : "risk-low"}`;
+            badge.textContent = tool.error ? "hata" : "custom";
+            row.append(content, badge);
+            dom.customToolList.appendChild(row);
+        });
+    }
+
+    function renderCustomToolEditor(tool, force = false) {
+        if (state.agentStudio.customDirty && !force) {
+            return;
+        }
+        dom.customToolAiBrief.value = "";
+        state.agentStudio.aiToolMessages = [];
+        renderAiToolConversation();
+        dom.customToolName.value = tool?.name || "";
+        dom.customToolName.disabled = Boolean(tool);
+        dom.customToolEnabled.checked = tool?.enabled ?? true;
+        dom.customToolDescription.value = tool?.description || "";
+        dom.customToolParamsNote.value = tool?.params_note || "";
+        const envTemplate = {};
+        (tool?.env_vars || []).forEach((name) => {
+            envTemplate[name] = "";
+        });
+        dom.customToolEnvVars.value = Object.keys(envTemplate).length > 0
+            ? JSON.stringify(envTemplate, null, 2)
+            : "";
+        dom.customToolCode.value = tool?.code || "def ornek_tool(text: str) -> str:\n    return text.upper()\n";
+        dom.customToolTestArgs.value = tool?.params_note?.trim().startsWith("{") ? tool.params_note : "{}";
+        dom.customToolTestResult.textContent = tool?.error ? `Yükleme hatası: ${tool.error}` : "Test çıktısı bekleniyor...";
+    }
+
+    function renderAiToolConversation() {
+        const messages = state.agentStudio.aiToolMessages || [];
+        dom.customToolAiConversation.innerHTML = "";
+        if (messages.length === 0) {
+            dom.customToolAiConversation.classList.add("empty-copy");
+            dom.customToolAiConversation.textContent = "AI brief sohbeti burada görünecek.";
+            return;
+        }
+        dom.customToolAiConversation.classList.remove("empty-copy");
+        messages.slice(-8).forEach((message) => {
+            const item = document.createElement("div");
+            item.className = `ai-message ${message.role === "assistant" ? "assistant" : "user"}`;
+            const label = document.createElement("strong");
+            label.textContent = message.role === "assistant" ? "AI" : "Sen";
+            const body = document.createElement("p");
+            body.textContent = message.content || "";
+            item.append(label, body);
+            dom.customToolAiConversation.appendChild(item);
+        });
+    }
+
+    function parseJsonField(value, label, fallback = {}) {
+        const raw = (value || "").trim();
+        if (!raw) {
+            return fallback;
+        }
+        try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                return parsed;
+            }
+            throw new Error(`${label} JSON object olmalı.`);
+        } catch (error) {
+            throw new Error(`${label} JSON değil: ${error.message}`);
+        }
+    }
+
+    async function generateCustomToolWithAi() {
+        const brief = dom.customToolAiBrief.value.trim();
+        if (brief.length < 8) {
+            toast("AI için biraz daha net bir tool brief'i yaz.", "error");
+            return;
+        }
+        state.agentStudio.aiToolMessages.push({ role: "user", content: brief });
+        renderAiToolConversation();
+
+        try {
+            dom.customToolAiGenerate.disabled = true;
+            dom.customToolAiGenerate.textContent = "Üretiliyor...";
+            dom.customToolTestResult.textContent = "AI tool taslağı hazırlanıyor...";
+            const result = await apiRequest("/agent-studio/custom-tools/generate", {
+                method: "POST",
+                body: {
+                    brief,
+                    current_name: dom.customToolName.value.trim(),
+                    current_description: dom.customToolDescription.value.trim(),
+                    current_code: dom.customToolCode.value,
+                    conversation: state.agentStudio.aiToolMessages,
+                },
+                timeout: 60000,
+            });
+            if (result.status === "needs_input") {
+                const questions = result.questions || [];
+                const message = [result.message || "Birkaç bilgi daha lazım.", ...questions].join("\n");
+                state.agentStudio.aiToolMessages.push({ role: "assistant", content: message });
+                renderAiToolConversation();
+                dom.customToolTestResult.textContent = message;
+                dom.customToolAiBrief.value = "";
+                toast("AI birkaç soru sordu; brief alanına cevap yazıp tekrar gönder.", "warning");
+                return;
+            }
+            const tool = result.tool || {};
+            state.agentStudio.selectedCustomToolName = "__new__";
+            dom.customToolName.disabled = false;
+            dom.customToolName.value = tool.name || "";
+            dom.customToolEnabled.checked = true;
+            dom.customToolDescription.value = tool.description || "";
+            dom.customToolParamsNote.value = tool.params_note || "";
+            dom.customToolEnvVars.value = JSON.stringify(tool.env_vars || {}, null, 2);
+            dom.customToolCode.value = tool.code || "";
+            dom.customToolTestArgs.value = JSON.stringify(tool.test_args || {}, null, 2);
+            dom.customToolTestResult.textContent = tool.warning
+                ? `${tool.warning}\n\nHam çıktı önizleme:\n${tool.raw_preview || ""}`
+                : "AI taslağı forma aktarıldı. Kaydetmeden önce test edebilirsin.";
+            state.agentStudio.aiToolMessages.push({ role: "assistant", content: `Tool taslağı hazır: ${tool.name || "isimsiz"}` });
+            renderAiToolConversation();
+            state.agentStudio.customDirty = true;
+            toast(tool.warning ? "AI çıktısı onarılamadı; güvenli taslak dolduruldu." : "AI custom tool taslağı oluşturdu.", tool.warning ? "warning" : "success");
+        } catch (error) {
+            dom.customToolTestResult.textContent = error.message;
+            toast(`AI tool üretemedi: ${error.message}`, "error");
+        } finally {
+            dom.customToolAiGenerate.disabled = false;
+            dom.customToolAiGenerate.textContent = "AI ile Tool Oluştur";
+        }
+    }
+
+    function selectCustomTool(name) {
+        state.agentStudio.selectedCustomToolName = name;
+        state.agentStudio.customDirty = false;
+        renderCustomToolEditor(getSelectedCustomTool(), true);
+        renderAgentStudio();
+    }
+
+    async function saveCustomTool(options = {}) {
+        const silent = options?.silent === true;
+        const payload = {
+            name: dom.customToolName.value.trim(),
+            enabled: dom.customToolEnabled.checked,
+            description: dom.customToolDescription.value.trim(),
+            params_note: dom.customToolParamsNote.value.trim(),
+            env_vars: {},
+            code: dom.customToolCode.value,
+        };
+        try {
+            payload.env_vars = parseJsonField(dom.customToolEnvVars.value, ".env.model değişkenleri", {});
+        } catch (error) {
+            if (!silent) {
+                toast(error.message, "error");
+            }
+            return false;
+        }
+        if (!payload.name) {
+            if (!silent) {
+                toast("Custom tool adı boş olamaz.", "error");
+            }
+            return false;
+        }
+        try {
+            const result = await apiRequest("/agent-studio/custom-tools", {
+                method: "POST",
+                body: payload,
+                timeout: 20000,
+            });
+            state.agentStudio.catalog = result.catalog || state.agentStudio.catalog;
+            state.agentStudio.selectedCustomToolName = payload.name;
+            state.agentStudio.customDirty = false;
+            renderAgentStudio();
+            if (!silent) {
+                toast("Custom tool kaydedildi.", "success");
+            }
+            return true;
+        } catch (error) {
+            if (!silent) {
+                toast(`Custom tool kaydedilemedi: ${error.message}`, "error");
+            }
+            return false;
+        }
+    }
+
+    async function testCustomTool() {
+        const name = dom.customToolName.value.trim();
+        if (!name) {
+            toast("Önce custom tool adı gir.", "error");
+            return;
+        }
+        let args = {};
+        try {
+            args = JSON.parse(dom.customToolTestArgs.value || "{}");
+        } catch (error) {
+            toast(`Test argümanı JSON değil: ${error.message}`, "error");
+            return;
+        }
+        try {
+            const existsInCatalog = Boolean((getStudioCatalog().custom_tools || []).find((tool) => tool.name === name));
+            if (state.agentStudio.customDirty || !existsInCatalog) {
+                dom.customToolTestResult.textContent = "Test öncesi tool kaydediliyor...";
+                const saved = await saveCustomTool({ silent: true });
+                if (!saved) {
+                    dom.customToolTestResult.textContent = "Tool kaydedilemediği için test başlatılamadı.";
+                    toast("Test için önce tool kaydı tamamlanmalı.", "error");
+                    return;
+                }
+            }
+            dom.customToolTestResult.textContent = "Çalışıyor...";
+            const result = await apiRequest(`/agent-studio/custom-tools/${encodeURIComponent(name)}/test`, {
+                method: "POST",
+                body: { arguments: args },
+                timeout: 25000,
+            });
+            dom.customToolTestResult.textContent = JSON.stringify({
+                arguments: result.arguments || args,
+                result: result.result,
+            }, null, 2);
+            toast("Custom tool testi tamamlandı.", "success");
+        } catch (error) {
+            dom.customToolTestResult.textContent = error.message;
+            toast(`Custom tool testi başarısız: ${error.message}`, "error");
+        }
     }
 
     function renderLogs(logs) {

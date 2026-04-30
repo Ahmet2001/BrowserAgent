@@ -23,6 +23,7 @@ if _PROJECT_ROOT not in sys.path:
 
 load_dotenv(dotenv_path=os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv(dotenv_path=os.path.join(_PROJECT_ROOT, ".env.local"), override=True)
+load_dotenv(dotenv_path=os.path.join(_PROJECT_ROOT, ".env.model"), override=True)
 load_dotenv(dotenv_path=os.path.join(_PROJECT_ROOT, ".env.secrets"), override=True)
 
 from MarketingApp.llms import BaseModel
