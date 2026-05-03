@@ -1,0 +1,11 @@
+{
+  "topic": "Web3 Utility & RWA",
+  "angle": "The shift from speculation to real-world utility",
+  "target_platform": "X",
+  "language": "Turkish",
+  "tone": "Professional, intriguing, calm",
+  "constraints": {
+    "max_chars": 240,
+    "max_hashtags": 3
+  }
+}

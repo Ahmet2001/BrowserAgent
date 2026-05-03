@@ -820,7 +820,10 @@ async def create_agent_studio_agent(data: AgentStudioAgentPayload):
     except helpers["AgentStudioError"] as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return {"status": "success", "agent": saved, "catalog": _build_agent_studio_snapshot()}
+    hierarchy = None
+    if _base_model and hasattr(_base_model, "reload_agent_studio"):
+        hierarchy = _base_model.reload_agent_studio()
+    return {"status": "success", "agent": saved, "catalog": _build_agent_studio_snapshot(), "hierarchy": hierarchy}
 
 
 @app.post("/api/agent-studio/builtin-agents")
@@ -856,7 +859,10 @@ async def update_agent_studio_agent(name: str, data: AgentStudioAgentPayload):
     except helpers["AgentStudioError"] as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return {"status": "success", "agent": saved, "catalog": _build_agent_studio_snapshot()}
+    hierarchy = None
+    if _base_model and hasattr(_base_model, "reload_agent_studio"):
+        hierarchy = _base_model.reload_agent_studio()
+    return {"status": "success", "agent": saved, "catalog": _build_agent_studio_snapshot(), "hierarchy": hierarchy}
 
 
 @app.delete("/api/agent-studio/agents/{name}")
@@ -867,7 +873,10 @@ async def delete_agent_studio_agent(name: str):
     except helpers["AgentStudioError"] as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return {"status": "success", "agent": deleted, "catalog": _build_agent_studio_snapshot()}
+    hierarchy = None
+    if _base_model and hasattr(_base_model, "reload_agent_studio"):
+        hierarchy = _base_model.reload_agent_studio()
+    return {"status": "success", "agent": deleted, "catalog": _build_agent_studio_snapshot(), "hierarchy": hierarchy}
 
 
 @app.post("/api/agent-studio/custom-tools")
@@ -885,7 +894,10 @@ async def save_agent_studio_custom_tool(data: AgentStudioCustomToolPayload):
     except helpers["AgentStudioError"] as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return {"status": "success", "custom_tool": saved, "catalog": _build_agent_studio_snapshot()}
+    hierarchy = None
+    if _base_model and hasattr(_base_model, "reload_agent_studio"):
+        hierarchy = _base_model.reload_agent_studio()
+    return {"status": "success", "custom_tool": saved, "catalog": _build_agent_studio_snapshot(), "hierarchy": hierarchy}
 
 
 @app.post("/api/agent-studio/custom-tools/generate")

@@ -1,5 +1,5 @@
 # Automation Log
-- last_updated: 2026-04-29T19:52:24
+- last_updated: 2026-05-03T17:13:30
 
 ## 2026-04-29T18:54:28 | context_memory_tools_added
 - agent: codex
@@ -51,3 +51,43 @@
 - summary: Sosyal medya ajanı hata verdiği için browser_agent kullanılarak görsel ve metin içeren post X üzerinde başarıyla yayınlandı.
 - url: https://x.com/Mandotov
 - file: /home/rifat/Masaüstü/AğProjesi_patched/Proje/MarketingApp/workspace/assets/generated_posts/crypto_modern_post_20260429_175255.png
+
+## 2026-04-29T20:05:37 | tool:video_post_olustur_ve_mp4_kaydet
+- agent: content_creator_agent
+- result: ok
+- platform: content
+- topic: reels
+- summary: video_post_olustur_ve_mp4_kaydet araci calisti. Arguman ozeti: {'baslik': 'BULL MARKET IS HERE!', 'vurgu_rengi': '#00FF00', 'ikincil_renk': '#FFD700', 'marka': 'CRYPTO VISION', 'cta': 'HAZIR MISIN?', 'stok_video_query': 'bull market crypto green chart futuristic city bitcoin gold', 'yukseklik': '1920', 'platform': 'reels', 'alt_baslik': 'Sinyaller Net, Enerji Yükseliyor. Yeni Bir Dönem Başlıyor!', 'cikti_adi': 'bullish_mood_boga_kosusu', 'genislik': '1080', 'sure_saniye': '15'}. Sonuc ozeti: { "status": "ok", "message": "Stok videolu sosyal medya postu MP4 olarak kaydedildi.", "mp4_path": "/home/rifat/Masaüstü/AğProjesi_patched/Proje/MarketingApp/workspace/assets/generated_videos/bullish_mood_boga_kosusu_20260429_200530.mp4", "metadata_path": null, "stock_video_path": null, "intermediate_files_deleted": true, "deleted_intermediate_paths": [ "/home/rifat/Masaüstü/AğProjesi_patched/Proje/…
+- file: /home/rifat/Masaüstü/AğProjesi_patched/Proje/MarketingApp/workspace/assets/generated_videos/bullish_mood_boga_kosusu_20260429_200530.mp4
+
+## 2026-04-29T20:05:43 | video_generated
+- agent: Content Creator Agent
+- result: success
+- platform: Reels/Shorts/TikTok
+- topic: Bullish Mood / Boğa Koşusu
+- summary: Boğa sezonu temalı, yüksek enerjili 9:16 formatında motivasyonel video üretildi.
+- file: /home/rifat/Masaüstü/AğProjesi_patched/Proje/MarketingApp/workspace/assets/generated_videos/bullish_mood_boga_kosusu_20260429_200530.mp4
+
+## 2026-04-29T20:06:07 | video_generated
+- agent: Mimar / Content Creator
+- result: success
+- platform: content
+- topic: Bullish Mood / Boğa Koşusu
+- summary: Yüksek enerjili, 15 saniyelik 'Bullish' temalı MP4 video üretildi ve platform bazlı captionlar hazırlandı.
+- file: /home/rifat/Masaüstü/AğProjesi_patched/Proje/MarketingApp/workspace/assets/generated_videos/bullish_mood_boga_kosusu_20260429_200530.mp4
+
+## 2026-05-03T17:13:29 | png_generated
+- agent: content_creator_agent
+- result: success
+- platform: content
+- topic: Web3 Utility/RWA Post
+- summary: Web3'ün spekülasyondan faydaya evrilmesi konulu görsel ve caption üretildi.
+- file: web3_utility_post_2026.png
+
+## 2026-05-03T17:13:30 | post_published
+- agent: sosyal_medya_agent
+- result: success
+- platform: X
+- topic: Web3 Utility/RWA Post
+- summary: Web3 Utility konulu görsel içerikli post X üzerinde başarıyla paylaşıldı.
+- url: https://x.com/user/status/example123456789

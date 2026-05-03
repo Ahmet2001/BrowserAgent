@@ -4,7 +4,7 @@ global_disabled_tools:
 agents:
 - name: sosyal_medya_agent
   type: builtin
-  enabled: true
+  enabled: false
   description: X, Instagram ve YouTube uzerinde yayinlama, etkilesim, bildirim tarama
     ve sosyal operasyon ajani.
   model: default
@@ -64,7 +64,7 @@ agents:
   - metin_ozetle
 - name: content_creator_agent
   type: builtin
-  enabled: true
+  enabled: false
   description: Caption, medya arama, website icerigi, HTML/CSS PNG post ve MP4 video
     uretim ajani.
   model: default
@@ -73,7 +73,7 @@ agents:
   tools: []
 - name: browser_agent
   type: builtin
-  enabled: true
+  enabled: false
   description: Selenium tabanli web gezinme, DOM okuma ve form etkilesimi ajani.
   model: browser_default
   tool_mode: default
@@ -81,7 +81,7 @@ agents:
   tools: []
 - name: computer
   type: builtin
-  enabled: true
+  enabled: false
   description: Bilgisyarla ilgili bi iş yapılması gerektiinde
   model: default
   tool_mode: custom

@@ -37,10 +37,8 @@ SYSTEM_INSTRUCTION = """
 Sen "Mimar" projesinin merkezi orkestratorusun.
 
 CALISMA KURALLARI:
-1. X (Twitter), Instagram ve YouTube ile ilgili yayinlama, yorum, begeni, takip, bildirim tarama ve platform ici operasyon gorevlerini `sosyal_medya_agent` alt ajanina devret.
-2. Caption, carousel, thread, web sitesinden icerik cikarip post paketine donusturme, kreatif kampanya fikri, gorsel/video medya arama, thumbnail brief ve video storyboard gibi icerik uretim gorevlerini `content_creator_agent` alt ajanina devret.
-2b. Gorselli post, afis, kapak veya PNG istenirse `content_creator_agent` ile HTML/CSS tabanli PNG uretimi yaptir.
-2c. Reels, Shorts, TikTok, MP4 veya stok videolu sosyal medya videosu istenirse `content_creator_agent` ile MP4 video uretimi yaptir.
+1. Yalnizca bu istekte tool semasinda gorunen aktif tool ve alt ajanlari kullan.
+2. Pasif alt ajanlari veya pasif tool'lari asla cagirma; gorev onlara bagimliysa kullaniciya hangi ajanin/tool'un kapali oldugunu soyle.
 3. Basit dosya ve workspace islemlerinde (okuma, yazma, listeleme) base tool'lari dogrudan kullan.
 4. Sosyal medya, icerik uretimi veya proje hafizasi gerektiren islerde once `context_paketi_oku` ile role, market_state, idea_pool ve recent_actions ozetini al.
 5. Onemli karar, dosya uretimi, post/reply denemesi veya basarili/basarisiz platform aksiyonu sonrasinda `context_aksiyon_kaydet` ile hafizaya iz dus.
@@ -49,6 +47,22 @@ CALISMA KURALLARI:
 8. Karmasik gorevlerde adim adim ilerle, gereksiz ajan cagrisi yapma.
 9. Yanitlarini Turkce ver.
 """
+
+SUBMODEL_ROUTING_RULES = {
+    "sosyal_medya_agent": (
+        "X (Twitter), Instagram ve YouTube yayinlama, yorum, begeni, takip, "
+        "bildirim tarama ve platform ici operasyon gorevlerini bu alt ajana devret."
+    ),
+    "content_creator_agent": (
+        "Caption, carousel, thread, web sitesinden icerik cikarip post paketine "
+        "donusturme, kreatif kampanya fikri, gorsel/video medya arama, PNG post "
+        "ve MP4 video uretimi gorevlerini bu alt ajana devret."
+    ),
+    "browser_agent": (
+        "Genel web gezinme, DOM okuma, form doldurma ve Selenium tabanli tarayici "
+        "isleri icin bu alt ajani kullan."
+    ),
+}
 
 
 def _process_stt(audio_data_bytes: bytes, recognizer: sr.Recognizer, rate: int = INPUT_RATE) -> str | None:
@@ -94,7 +108,19 @@ class BaseModel:
         print(f"   Sağlayıcı: {self.provider_name}")
         if self.reasoning_effort:
             print(f"   Reasoning effort: {self.reasoning_effort}")
-        print(f"   SubModel tool'ları: {[f.__name__ for f in self._submodel_funcs]}")
+        active_submodels = [
+            name
+            for name in self._submodel_func_map
+            if self._is_runtime_callable_active(name)
+        ]
+        inactive_submodels = [
+            name
+            for name in self._submodel_func_map
+            if name not in active_submodels
+        ]
+        print(f"   Aktif SubModel tool'ları: {active_submodels}")
+        if inactive_submodels:
+            print(f"   Pasif SubModel'lar: {inactive_submodels}")
 
     def _configure_agent_runtime(self):
         from .SubModels.generic_config_agent import GenericConfigAgent
@@ -198,6 +224,10 @@ class BaseModel:
     def _apply_tool_activation_to_submodels(self):
         for submodel in getattr(self, "submodels", []):
             original_tools = self._agent_original_tools.get(submodel.name, list(submodel.tools))
+            if not self.active_agents.get(submodel.name, True):
+                submodel.tools = []
+                submodel._tool_map = {}
+                continue
             filtered_tools = [
                 func
                 for func in original_tools
@@ -205,6 +235,45 @@ class BaseModel:
             ]
             submodel.tools = filtered_tools
             submodel._tool_map = {func.__name__: func for func in filtered_tools}
+
+    def _is_runtime_callable_active(self, name: str) -> bool:
+        if name in {"ekrana_yazdir", "metinle_cevapla"}:
+            return True
+        if name in self._submodel_func_map:
+            return bool(self.active_agents.get(name, False)) and bool(self.active_tools.get(name, False))
+        return bool(self.active_tools.get(name, True))
+
+    def _build_runtime_system_instruction(self) -> str:
+        active_rules = []
+        inactive_names = []
+
+        for submodel in getattr(self, "submodels", []):
+            is_active = bool(self.active_agents.get(submodel.name, True))
+            if is_active:
+                rule = SUBMODEL_ROUTING_RULES.get(submodel.name)
+                if rule:
+                    active_rules.append(f"- `{submodel.name}` aktif: {rule}")
+                else:
+                    active_rules.append(f"- `{submodel.name}` aktif: {submodel.description}")
+            else:
+                inactive_names.append(submodel.name)
+
+        if active_rules:
+            routing_block = "\nAKTIF ALT AJAN ROTASI:\n" + "\n".join(active_rules)
+        else:
+            routing_block = (
+                "\nAKTIF ALT AJAN ROTASI:\n"
+                "- Su anda aktif alt ajan yok. Gorevi sadece aktif base tool'lar ile yap; "
+                "kapali alt ajan gerektiren islerde basari iddia etme."
+            )
+
+        if inactive_names:
+            routing_block += (
+                "\n\nPASIF ALT AJANLAR:\n"
+                + "\n".join(f"- `{name}` pasif; bu ismi tool/ajan olarak cagirma." for name in inactive_names)
+            )
+
+        return SYSTEM_INSTRUCTION.rstrip() + "\n" + routing_block + "\n"
 
     def reload_agent_studio(self) -> dict:
         self._configure_agent_runtime()
@@ -300,10 +369,10 @@ class BaseModel:
 
         tools = [ekrana_yazdir, metinle_cevapla]
         for func in BASE_ARACLAR:
-            if self.active_tools.get(func.__name__, True):
+            if self._is_runtime_callable_active(func.__name__):
                 tools.append(func)
         for func in self._submodel_funcs:
-            if self.active_agents.get(func.__name__, True) and self.active_tools.get(func.__name__, True):
+            if self._is_runtime_callable_active(func.__name__):
                 tools.append(func)
         return tools
 
@@ -467,6 +536,13 @@ class BaseModel:
         except Exception:
             return {}
 
+    def _tool_repeat_key(self, name: str, args: dict) -> str:
+        try:
+            normalized_args = json.dumps(args or {}, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            normalized_args = str(args or {})
+        return f"{name}:{normalized_args}"
+
     def _extract_message_text(self, message) -> str:
         content = getattr(message, "content", "")
         if isinstance(content, str):
@@ -543,6 +619,11 @@ class BaseModel:
             return f"[Hata]: {name} adinda bir tool veya submodel bulunamadi."
 
         is_submodel = name in self._submodel_func_map
+        if not self._is_runtime_callable_active(name):
+            kind = "Alt ajan" if is_submodel else "Tool"
+            self.log_message("sistem", f"{kind} pasif oldugu icin cagri engellendi: {name}")
+            return f"[Hata]: {kind} pasif: {name}. Panelden aktiflestirilmeden calistirilamaz."
+
         emoji = "🤖" if is_submodel else "🔧"
         label = "submodel" if is_submodel else "tool"
 
@@ -589,6 +670,7 @@ class BaseModel:
         tool_schemas = self._build_tool_schemas()
         self._request_start_time = time.time()
         final_text = ""
+        tool_repeat_counts: dict[str, int] = {}
 
         blocked_message = self._get_provider_unavailable_message()
         if blocked_message:
@@ -639,14 +721,25 @@ class BaseModel:
 
                 for call in tool_calls:
                     args = self._parse_tool_args(call.function.arguments)
-                    result = await self._execute_named_tool(
-                        call.function.name,
-                        args,
-                        direct_texts,
-                        cevap_metinleri,
-                        on_direct_text=on_direct_text,
-                        on_cevap_metni=on_cevap_metni,
-                    )
+                    repeat_key = self._tool_repeat_key(call.function.name, args)
+                    tool_repeat_counts[repeat_key] = tool_repeat_counts.get(repeat_key, 0) + 1
+                    repeat_limit = 1 if call.function.name == "context_paketi_oku" else 2
+                    if tool_repeat_counts[repeat_key] > repeat_limit:
+                        result = (
+                            "[SISTEM_MESAJI_GIZLI] Ayni tool ayni argumanlarla bu istek icinde "
+                            "zaten calisti. Sonucu tekrar isteme; mevcut baglamla devam et veya "
+                            "gerekirse kullaniciya net blokaj bildir."
+                        )
+                        self.log_message("sistem", f"Tekrarlayan tool cagrisi engellendi: {call.function.name}")
+                    else:
+                        result = await self._execute_named_tool(
+                            call.function.name,
+                            args,
+                            direct_texts,
+                            cevap_metinleri,
+                            on_direct_text=on_direct_text,
+                            on_cevap_metni=on_cevap_metni,
+                        )
                     messages.append({
                         "role": "tool",
                         "tool_call_id": call.id,
@@ -681,7 +774,7 @@ class BaseModel:
             from MarketingApp.araclar import rol_oku
 
             aktif_rol = rol_oku()
-            system_instruction = SYSTEM_INSTRUCTION
+            system_instruction = self._build_runtime_system_instruction()
             if not aktif_rol.startswith("⚠️") and not aktif_rol.startswith("❌"):
                 system_instruction += (
                     "\n\n=========== SENIN MARKETING KISILIGIN (ZORUNLU) ===========\n"
