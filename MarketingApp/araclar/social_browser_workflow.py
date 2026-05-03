@@ -214,7 +214,9 @@ def _contains_non_bmp(text: str) -> bool:
 def _looks_recently_processed(existing: dict[str, Any] | None) -> bool:
     if not existing:
         return False
-    return existing.get("status") in {"sent", "skipped", "pending_verify"}
+    # `pending_verify` kesin basari degil; sonraki taramalarda ayni item yeniden
+    # degerlendirilip toparlanabilsin.
+    return existing.get("status") in {"sent", "skipped"}
 
 
 def _classify_notification_candidate(
@@ -1858,15 +1860,56 @@ def _submit_x_composer():
     }
 
 
-def _verify_x_submission(message: str) -> dict[str, Any]:
+def _verify_x_submission(message: str, *, prefer_current_url: bool = True) -> dict[str, Any]:
     driver = _get_driver()
-    time.sleep(1.4)
-    snapshot = _build_submission_snapshot(driver, message)
-    verification = _assess_submission_snapshot(snapshot, message)
-    verification["snapshot_url"] = snapshot.get("page_url", "")
-    verification["snapshot_title"] = snapshot.get("title", "")
-    verification["snapshot_excerpt"] = _compact_text(snapshot.get("body_excerpt", ""), 240)
-    return verification
+    last_verification: dict[str, Any] = {
+        "attempted": True,
+        "verified": False,
+        "verification_state": "pending_verify",
+        "evidence": [],
+        "warning": "dogrulama_bekleniyor",
+        "error": "",
+    }
+
+    for attempt in range(5):
+        time.sleep(1.2 if attempt == 0 else 0.9)
+        snapshot = _build_submission_snapshot(driver, message)
+        verification = _assess_submission_snapshot(snapshot, message)
+        verification["snapshot_url"] = snapshot.get("page_url", "")
+        verification["snapshot_title"] = snapshot.get("title", "")
+        verification["snapshot_excerpt"] = _compact_text(snapshot.get("body_excerpt", ""), 240)
+
+        evidence = list(verification.get("evidence") or [])
+        composer_cleared = "composer_cleared" in evidence
+        if (
+            not verification.get("verified")
+            and verification.get("verification_state") == "pending_verify"
+            and composer_cleared
+        ):
+            resolved_url = _resolve_recent_status_url(
+                driver,
+                message,
+                prefer_current_url=prefer_current_url,
+            )
+            if resolved_url:
+                if "resolved_status_url" not in evidence:
+                    evidence.append("resolved_status_url")
+                verification.update(
+                    {
+                        "verified": True,
+                        "verification_state": "verified",
+                        "evidence": evidence,
+                        "warning": "",
+                        "error": "",
+                        "resolved_tweet_url": resolved_url,
+                    }
+                )
+
+        last_verification = verification
+        if verification.get("verified") or verification.get("verification_state") == "error":
+            return verification
+
+    return last_verification
 
 
 def _parse_thread_parts(thread_parts: str) -> list[str]:
@@ -1897,8 +1940,12 @@ def publish_x_post(text: str) -> dict[str, Any]:
     driver.get("https://x.com/compose/post")
     _composer, type_method = _type_into_x_composer(message)
     result = _submit_x_composer()
-    verification = _verify_x_submission(message)
-    resolved_tweet_url = _resolve_recent_status_url(driver, message) if verification.get("verified") else ""
+    verification = _verify_x_submission(message, prefer_current_url=True)
+    resolved_tweet_url = verification.get("resolved_tweet_url") or (
+        _resolve_recent_status_url(driver, message, prefer_current_url=True)
+        if verification.get("verified")
+        else ""
+    )
     return {
         "status": "posted" if verification["verified"] else verification["verification_state"],
         "length": len(message),
@@ -1929,8 +1976,12 @@ def publish_x_post_with_media(text: str, media_path: str) -> dict[str, Any]:
     _composer, type_method = _type_into_x_composer(message)
     media_result = _attach_media_to_x_composer(media_path)
     result = _submit_x_composer()
-    verification = _verify_x_submission(message)
-    resolved_tweet_url = _resolve_recent_status_url(driver, message) if verification.get("verified") else ""
+    verification = _verify_x_submission(message, prefer_current_url=True)
+    resolved_tweet_url = verification.get("resolved_tweet_url") or (
+        _resolve_recent_status_url(driver, message, prefer_current_url=True)
+        if verification.get("verified")
+        else ""
+    )
     return {
         "status": "posted" if verification["verified"] else verification["verification_state"],
         "length": len(message),
@@ -1955,14 +2006,18 @@ def submit_current_x_composer() -> dict[str, Any]:
 
     message = (_read_element_value(driver, composer) or "").strip()
     result = _submit_x_composer()
-    verification = _verify_x_submission(message) if message else {
+    verification = _verify_x_submission(message, prefer_current_url=True) if message else {
         "attempted": True,
         "verified": False,
         "verification_state": "pending_verify",
         "evidence": ["empty_or_unreadable_composer_text"],
         "warning": "Composer metni okunamadığı için doğrulama sınırlı.",
     }
-    resolved_tweet_url = _resolve_recent_status_url(driver, message) if message and verification.get("verified") else ""
+    resolved_tweet_url = verification.get("resolved_tweet_url") or (
+        _resolve_recent_status_url(driver, message, prefer_current_url=True)
+        if message and verification.get("verified")
+        else ""
+    )
     return {
         "status": "posted" if verification.get("verified") else verification.get("verification_state", "pending_verify"),
         "text": message,
@@ -1999,8 +2054,12 @@ def reply_to_x_post(tweet_url: str, message: str) -> dict[str, Any]:
     _human_click(driver, reply_button)
     _composer, type_method = _type_into_x_composer(reply_text)
     result = _submit_x_composer()
-    verification = _verify_x_submission(reply_text)
-    resolved_tweet_url = _resolve_recent_status_url(driver, reply_text, prefer_current_url=False) if verification.get("verified") else ""
+    verification = _verify_x_submission(reply_text, prefer_current_url=False)
+    resolved_tweet_url = verification.get("resolved_tweet_url") or (
+        _resolve_recent_status_url(driver, reply_text, prefer_current_url=False)
+        if verification.get("verified")
+        else ""
+    )
     return {
         "status": "sent" if verification["verified"] else verification["verification_state"],
         "tweet_url": target_url,
