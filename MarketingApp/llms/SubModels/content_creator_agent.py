@@ -12,11 +12,12 @@ from openai import AsyncOpenAI
 from .base import SubModel, SubModelRateLimitError, register_submodel
 from MarketingApp.araclar import CONTENT_CREATOR_ARACLARI
 from MarketingApp.llms.runtime_config import (
-    get_base_model_name,
-    get_base_reasoning_effort,
     get_model_api_key,
+    get_model_api_keys,
     get_openai_compat_base_url,
     get_provider_display_name,
+    get_submodel_model_name,
+    get_submodel_reasoning_effort,
 )
 
 
@@ -53,9 +54,10 @@ class ContentCreatorAgentSubModel(SubModel):
     """Caption, kreatif brief, görsel/video medya arama ve içerik paketleme uzmanı."""
 
     def __init__(self):
-        api_key = get_model_api_key()
+        api_keys = get_model_api_keys()
+        api_key = api_keys[0] if api_keys else get_model_api_key()
         self.provider_name = get_provider_display_name()
-        self.reasoning_effort = get_base_reasoning_effort()
+        self.reasoning_effort = get_submodel_reasoning_effort()
         if not api_key:
             print(f"⚠️  UYARI: {self.provider_name} API anahtari bulunamadi!")
 
@@ -71,14 +73,11 @@ class ContentCreatorAgentSubModel(SubModel):
                 "seceneklerini, kaynak linklerini, PNG/MP4 dosya yolunu ve kullanilabilir "
                 "icerik metinlerini hazirlar."
             ),
-            model_id=get_base_model_name(),
+            model_id=get_submodel_model_name(),
             api_key=api_key,
             tools=CONTENT_CREATOR_ARACLARI,
         )
-        self._client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=get_openai_compat_base_url(),
-        )
+        self._configure_openai_client(get_openai_compat_base_url(), api_keys)
 
     def _strip_thought_blocks(self, text: str) -> str:
         return re.sub(r"<thought>.*?</thought>", "", text or "", flags=re.DOTALL | re.IGNORECASE).strip()
@@ -171,7 +170,7 @@ class ContentCreatorAgentSubModel(SubModel):
                 if self.reasoning_effort:
                     create_kwargs["reasoning_effort"] = self.reasoning_effort
 
-                completion = await self._client.chat.completions.create(**create_kwargs)
+                completion = await self._create_chat_completion_with_failover(create_kwargs)
                 message = completion.choices[0].message
                 current_text = self._extract_message_text(message)
                 tool_calls = getattr(message, "tool_calls", None) or []

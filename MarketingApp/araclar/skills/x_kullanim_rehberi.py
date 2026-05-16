@@ -39,10 +39,12 @@ NEYE DIKKAT ETMELISIN
     "post": """
 POST ATMA AKISI
 1. Once son aksiyonlari kontrol et; ayni konu, ayni aci veya benzer cumle tekrar etmesin.
-2. Gorsel varsa publish_x_post_with_media, yalniz metin varsa publish_x_post kullan. Bu araclar varken browser click/type ile post atmayi tercih etme.
-3. Cok parcali anlatim gerekiyorsa publish_x_thread kullan.
-4. Metin 240 karakteri gecmesin. Tek fikirli ve net olsun.
-5. Gonderimden sonra basarinin kanitini ara: yeni post gorunuyor mu, URL degisti mi, toast veya timeline teyidi var mi.
+2. Gorsel varsa publish_x_post_with_media ile drafti hazirla. Bu arac son Post tusuna basmaz.
+3. Draft hazir olduktan sonra submit_current_x_composer ile submit et.
+4. Submit sonrasinda verify_current_x_submission ile teyit al; gerekiyorsa resolve_recent_x_status_url ile URL coz.
+5. Cok parcali anlatim gerekiyorsa publish_x_thread kullan.
+6. Metin 240 karakteri gecmesin. Tek fikirli ve net olsun.
+7. Gonderimden sonra basarinin kanitini ara: yeni post gorunuyor mu, URL degisti mi, toast veya timeline teyidi var mi.
 
 POST ICIN HATALI DAVRANISLAR
 - Bos compose alanina iki kez submit basmak.

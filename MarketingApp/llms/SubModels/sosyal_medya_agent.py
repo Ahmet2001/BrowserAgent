@@ -10,17 +10,19 @@ from __future__ import annotations
 
 import json
 import re
+import traceback
 
 from openai import AsyncOpenAI
 
 from .base import SubModel, SubModelRateLimitError, register_submodel
 from MarketingApp.araclar import SOSYAL_MEDYA_ARACLARI
 from MarketingApp.llms.runtime_config import (
-    get_base_model_name,
-    get_base_reasoning_effort,
     get_model_api_key,
+    get_model_api_keys,
     get_openai_compat_base_url,
     get_provider_display_name,
+    get_submodel_model_name,
+    get_submodel_reasoning_effort,
 )
 
 
@@ -43,10 +45,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "6. Basarisiz bir islem olursa hata mesajini raporla, gereksiz tekrarlardan kacin.\n"
     "7. X tarayicisi acik degilse once `launch_x_browser()` veya `launch_social_browser()` cagir.\n"
     "8. Tarayici durumunu `get_browser_status()` ile kontrol edebilirsin.\n"
-    "9. Elinde yerel bir PNG/JPG dosya yolu varsa ve gorselli post isteniyorsa `publish_x_post_with_media` aracini tercih et; sadece metin paylasma.\n"
-    "10. Composer ekrani hazir ama son Post/Reply tusuna basamadiysan `submit_current_x_composer` kurtarma aracini kullan.\n"
-    "11. X'te gorselli post attiysan final yaniyta media dosya yolunu ve cozulen tweet URL'sini yaz.\n"
-    "12. Gorev tamamlandiginda kisa ve net bir Turkce ozet ver.\n"
+    "9. Elinde yerel bir PNG/JPG dosya yolu varsa ve gorselli post isteniyorsa `publish_x_post_with_media` ile once drafti hazirla; bu arac son Post tusuna basmaz.\n"
+    "10. Draft hazir olduktan sonra `submit_current_x_composer` ile son Post/Reply tusuna bas.\n"
+    "11. Submit sonrasinda `verify_current_x_submission` ile dogrulama yap; dogrulama basariliysa `resolve_recent_x_status_url` ile tweet URL'sini ayri coz.\n"
+    "12. Composer ekrani hazir ama son Post/Reply tusuna basamadiysan `submit_current_x_composer` kurtarma aracini kullan.\n"
+    "13. Yuksek seviyeli X araclari takilirsa ayni oturumda browser fallback araclarini kullanabilirsin: "
+    "`browser_hizli_durum_oku`, `browser_ilgili_bolumleri_getir`, `browser_bul`, "
+    "`browser_click_text`, `browser_click_role`, `browser_click_css`, `browser_click_id`, "
+    "`browser_eleman_bekle`, `browser_bekle`, `browser_screenshot`.\n"
+    "14. X'te gorselli post attiysan final yaniyta media dosya yolunu ve cozulen tweet URL'sini yaz.\n"
+    "15. Gorev tamamlandiginda kisa ve net bir Turkce ozet ver.\n"
 )
 
 
@@ -54,9 +62,10 @@ class SosyalMedyaAgentSubModel(SubModel):
     """X (Twitter), Instagram ve YouTube uzerinde icerik uretimi, etkilesim ve analiz uzmani."""
 
     def __init__(self):
-        api_key = get_model_api_key()
+        api_keys = get_model_api_keys()
+        api_key = api_keys[0] if api_keys else get_model_api_key()
         self.provider_name = get_provider_display_name()
-        self.reasoning_effort = get_base_reasoning_effort()
+        self.reasoning_effort = get_submodel_reasoning_effort()
         if not api_key:
             print(f"⚠️  UYARI: {self.provider_name} API anahtari bulunamadi!")
 
@@ -69,14 +78,11 @@ class SosyalMedyaAgentSubModel(SubModel):
                 "gorevleri icin bu ajani kullan. Kripto, DeFi, NFT, blockchain icerik uretimi "
                 "ve topluluk yonetimi konularinda uzmandir."
             ),
-            model_id=get_base_model_name(),
+            model_id=get_submodel_model_name(),
             api_key=api_key,
             tools=SOSYAL_MEDYA_ARACLARI,
         )
-        self._client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=get_openai_compat_base_url(),
-        )
+        self._configure_openai_client(get_openai_compat_base_url(), api_keys)
 
     def _strip_thought_blocks(self, text: str) -> str:
         return re.sub(
@@ -150,6 +156,18 @@ class SosyalMedyaAgentSubModel(SubModel):
         except Exception:
             return {}
 
+    def _looks_like_publish_success_log(self, tool_name: str, args: dict) -> bool:
+        if tool_name != "context_aksiyon_kaydet":
+            return False
+        eylem = str(args.get("eylem", "")).strip().lower()
+        sonuc = str(args.get("sonuc", "")).strip().lower()
+        platform = str(args.get("platform", "")).strip().lower()
+        return (
+            eylem == "post_published"
+            and sonuc == "success"
+            and platform in {"x", "twitter", "x (twitter)"}
+        )
+
     async def run(self, gorev: str) -> str:
         print(f"\n📱 [{self.name}] Sosyal medya gorevi baslatiliyor: {gorev[:120]}...")
 
@@ -171,6 +189,14 @@ class SosyalMedyaAgentSubModel(SubModel):
             {"role": "user", "content": gorev},
         ]
         final_response = "Tamamlandi"
+        publish_flow_state = {
+            "draft_ready": False,
+            "submitted": False,
+            "verified": False,
+            "verification_state": "",
+            "expected_text": "",
+            "resolved_tweet_url": "",
+        }
 
         try:
             for _ in range(16):
@@ -183,9 +209,7 @@ class SosyalMedyaAgentSubModel(SubModel):
                 if self.reasoning_effort:
                     create_kwargs["reasoning_effort"] = self.reasoning_effort
 
-                completion = await self._client.chat.completions.create(
-                    **create_kwargs
-                )
+                completion = await self._create_chat_completion_with_failover(create_kwargs)
                 message = completion.choices[0].message
                 current_text = self._extract_message_text(message)
                 tool_calls = getattr(message, "tool_calls", None) or []
@@ -197,20 +221,76 @@ class SosyalMedyaAgentSubModel(SubModel):
 
                     for call in tool_calls:
                         args = self._parse_tool_args(call.function.arguments)
-                        result = await self._execute_tool(
-                            call.function.name, args
-                        )
+                        tool_name = call.function.name
+
+                        if (
+                            publish_flow_state["submitted"]
+                            and not publish_flow_state["verified"]
+                            and self._looks_like_publish_success_log(tool_name, args)
+                        ):
+                            result = {
+                                "status": "blocked_until_verified",
+                                "error": (
+                                    "X postu success olarak kaydedilemez; once "
+                                    "`verify_current_x_submission` ve sonra "
+                                    "`resolve_recent_x_status_url` cagrilmalidir."
+                                ),
+                                "publish_flow_state": dict(publish_flow_state),
+                            }
+                        else:
+                            result = await self._execute_tool(tool_name, args)
+
+                        if tool_name == "publish_x_post_with_media" and isinstance(result, dict):
+                            if result.get("status") == "draft_ready":
+                                publish_flow_state["draft_ready"] = True
+                                publish_flow_state["expected_text"] = (
+                                    result.get("text", "") or publish_flow_state["expected_text"]
+                                )
+                        elif tool_name == "submit_current_x_composer" and isinstance(result, dict):
+                            if result.get("status") == "submitted":
+                                publish_flow_state["submitted"] = True
+                                publish_flow_state["expected_text"] = (
+                                    result.get("text", "") or publish_flow_state["expected_text"]
+                                )
+                        elif tool_name == "verify_current_x_submission" and isinstance(result, dict):
+                            publish_flow_state["verified"] = bool(result.get("verified"))
+                            publish_flow_state["verification_state"] = str(
+                                result.get("verification_state", "") or ""
+                            )
+                            publish_flow_state["expected_text"] = (
+                                result.get("expected_text", "") or publish_flow_state["expected_text"]
+                            )
+                        elif tool_name == "resolve_recent_x_status_url" and isinstance(result, dict):
+                            publish_flow_state["resolved_tweet_url"] = str(
+                                result.get("resolved_tweet_url", "") or ""
+                            )
+
                         messages.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": call.id,
-                                "name": call.function.name,
+                                "name": tool_name,
                                 "content": json.dumps(
                                     {"result": str(result)[:6000]},
                                     ensure_ascii=False,
                                 ),
                             }
                         )
+                    continue
+
+                if publish_flow_state["submitted"] and not publish_flow_state["verified"]:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "X publish akisi henuz tamamlanmadi. Final cevap verme ve "
+                                "success kaydi dusme. Simdi "
+                                "`verify_current_x_submission(expected_text=...)` cagir. "
+                                "Dogrulama basariliysa hemen ardindan "
+                                "`resolve_recent_x_status_url(expected_text=...)` cagir."
+                            ),
+                        }
+                    )
                     continue
 
                 if current_text:
@@ -224,7 +304,8 @@ class SosyalMedyaAgentSubModel(SubModel):
                     f"  ⚠️ [{self.name}] {self.provider_name} limit hatasi! BaseModel'e devrediliyor."
                 )
                 raise SubModelRateLimitError(self.name, self.tools)
-            print(f"  ❌ [{self.name}] API Hatasi: {e}")
+            print(f"  ❌ [{self.name}] API Hatasi ({type(e).__name__}): {e}")
+            print(traceback.format_exc())
             return f"Sosyal Medya Agent Hatasi: {e}"
 
         print(f"  ✅ [{self.name}] Gorev tamamlandi.")

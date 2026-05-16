@@ -2,6 +2,8 @@ import json
 import inspect
 from abc import ABC, abstractmethod
 
+from openai import AsyncOpenAI
+
 
 AUTO_CONTEXT_LOG_TOOLS = {
     "save_x_market_snapshot",
@@ -105,6 +107,9 @@ class SubModel(ABC):
         self.api_key = api_key
         self.tools = tools or []
         self._tool_map = {func.__name__: func for func in self.tools}
+        self._api_keys = [api_key] if api_key else []
+        self._api_key_index = 0
+        self._openai_base_url = ""
 
     @abstractmethod
     async def run(self, gorev: str) -> str:
@@ -160,6 +165,81 @@ class SubModel(ABC):
             schemas.append(schema)
 
         return schemas
+
+    def _configure_openai_client(self, base_url: str, api_keys: list[str] | None = None):
+        unique_keys = []
+        for key in api_keys or self._api_keys or [self.api_key]:
+            cleaned = str(key or "").strip()
+            if cleaned and cleaned not in unique_keys:
+                unique_keys.append(cleaned)
+
+        self._api_keys = unique_keys
+        self._api_key_index = 0
+        self._openai_base_url = base_url
+        self.api_key = self._api_keys[0] if self._api_keys else ""
+        self._client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self._openai_base_url,
+        )
+
+    def _rotate_openai_client(self) -> bool:
+        if self._api_key_index + 1 >= len(self._api_keys):
+            return False
+
+        self._api_key_index += 1
+        self.api_key = self._api_keys[self._api_key_index]
+        self._client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self._openai_base_url,
+        )
+        print(
+            f"  🔁 [{self.name}] Yedek API anahtarina gecildi "
+            f"({self._api_key_index + 1}/{len(self._api_keys)})"
+        )
+        return True
+
+    def _is_retryable_provider_error(self, exc: Exception) -> bool:
+        err = str(exc).lower()
+        retryable_markers = (
+            "internal error",
+            "internal server error",
+            "server had an error",
+            "upstream error",
+            "service unavailable",
+            "temporarily unavailable",
+            "overloaded",
+            "backend error",
+            "connection error",
+            "connection reset",
+            "remoteprotocolerror",
+            "timed out",
+            "timeout",
+            "rate limit",
+            "quota",
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+        )
+        return any(marker in err for marker in retryable_markers)
+
+    async def _create_chat_completion_with_failover(self, create_kwargs: dict):
+        attempts = max(1, len(self._api_keys) or 1)
+        last_exc = None
+
+        for attempt in range(attempts):
+            try:
+                return await self._client.chat.completions.create(**create_kwargs)
+            except Exception as exc:
+                last_exc = exc
+                can_retry = attempt < attempts - 1 and self._is_retryable_provider_error(exc)
+                if can_retry and self._rotate_openai_client():
+                    continue
+                raise
+
+        if last_exc:
+            raise last_exc
 
     async def _execute_tool(self, name: str, arguments: dict):
         """İsme göre tool'u çalıştırır (Bloklamadan/Non-blocking)."""

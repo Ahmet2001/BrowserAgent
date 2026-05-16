@@ -17,6 +17,7 @@ from MarketingApp.llms.runtime_config import (
     get_browser_model_name,
     get_browser_reasoning_effort,
     get_model_api_key,
+    get_model_api_keys,
     get_openai_compat_base_url,
     get_provider_display_name,
 )
@@ -73,7 +74,8 @@ class BrowserAgentSubModel(SubModel):
     }
 
     def __init__(self):
-        api_key = get_model_api_key()
+        api_keys = get_model_api_keys()
+        api_key = api_keys[0] if api_keys else get_model_api_key()
         self.provider_name = get_provider_display_name()
         self.reasoning_effort = get_browser_reasoning_effort()
         if not api_key:
@@ -89,10 +91,7 @@ class BrowserAgentSubModel(SubModel):
             api_key=api_key,
             tools=BROWSER_ARACLARI,
         )
-        self._client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=get_openai_compat_base_url(),
-        )
+        self._configure_openai_client(get_openai_compat_base_url(), api_keys)
 
     def _extract_message_text(self, message) -> str:
         content = getattr(message, "content", "")
@@ -367,7 +366,7 @@ class BrowserAgentSubModel(SubModel):
                 if self.reasoning_effort:
                     create_kwargs["reasoning_effort"] = self.reasoning_effort
 
-                completion = await self._client.chat.completions.create(**create_kwargs)
+                completion = await self._create_chat_completion_with_failover(create_kwargs)
                 message = completion.choices[0].message
                 current_text = self._extract_message_text(message)
                 tool_calls = getattr(message, "tool_calls", None) or []

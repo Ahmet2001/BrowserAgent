@@ -992,6 +992,47 @@ def _wait_for_x_content(timeout: int = 12) -> str:
         return ""
 
 
+def _describe_x_page(driver, *, readiness: str = "") -> str:
+    try:
+        body_text = driver.execute_script(
+            "return ((document.body && document.body.innerText) || '').trim().slice(0, 280);"
+        )
+    except Exception:
+        body_text = ""
+    return (
+        f"url={getattr(driver, 'current_url', '')!r}, "
+        f"title={getattr(driver, 'title', '')!r}, "
+        f"readiness={readiness or 'none'!r}, "
+        f"body_excerpt={_compact_text(body_text or '', 220)!r}"
+    )
+
+
+def _ensure_x_compose_ready(timeout: int = 15):
+    driver = _get_driver()
+    driver.get("https://x.com/compose/post")
+    readiness = _wait_for_x_content(timeout=timeout)
+    snapshot = _build_submission_snapshot(driver, "")
+    page_text = _normalize_compact(snapshot.get("body_text", ""))
+
+    if any(marker in page_text for marker in _LOGIN_WALL_MARKERS):
+        raise RuntimeError(
+            "X compose acilamadi: oturum login duvarina dustu. "
+            + _describe_x_page(driver, readiness=readiness)
+        )
+
+    try:
+        WebDriverWait(driver, timeout).until(
+            lambda current_driver: _locate_x_composer(current_driver) is not None
+        )
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "X compose editoru bulunamadi. "
+            + _describe_x_page(driver, readiness=readiness)
+        ) from exc
+
+    return driver
+
+
 def _compact_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {
         "tweet_id": entry.get("tweet_id", ""),
@@ -1638,6 +1679,84 @@ def _locate_x_media_input(driver):
     return driver.execute_script(js, list(_X_MEDIA_INPUT_SELECTORS))
 
 
+def _read_x_media_attach_state(driver) -> dict[str, Any]:
+    js = """
+    const selectors = arguments[0] || [];
+    const normalize = (value) => (value || '')
+      .toLowerCase()
+      .replace(/[ı]/g, 'i')
+      .replace(/[ğ]/g, 'g')
+      .replace(/[ü]/g, 'u')
+      .replace(/[ş]/g, 's')
+      .replace(/[ö]/g, 'o')
+      .replace(/[ç]/g, 'c')
+      .replace(/\\s+/g, ' ')
+      .trim();
+    const isVisible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+
+    let input = null;
+    for (const selector of selectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (el && (el.tagName || '').toLowerCase() === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'file') {
+          input = el;
+          break;
+        }
+      }
+      if (input) break;
+    }
+
+    const visibleButtons = [...document.querySelectorAll("button, div[role='button'], [role='button']")]
+      .filter((el) => isVisible(el))
+      .map((el) => normalize([el.innerText, el.textContent, el.getAttribute('aria-label'), el.getAttribute('title')].filter(Boolean).join(' ')))
+      .filter(Boolean);
+
+    const mediaButtons = visibleButtons.filter((text) =>
+      text.includes('remove media') ||
+      text.includes('remove image') ||
+      text.includes('remove') ||
+      text.includes('medyayi kaldir') ||
+      text.includes('gorseli kaldir') ||
+      text.includes('gorsel kaldir') ||
+      text.includes('alt')
+    );
+
+    const composerRoot =
+      document.querySelector("[data-testid='tweetTextarea_0']") ||
+      document.querySelector("main[role='main']") ||
+      document.body;
+    const previewImages = composerRoot
+      ? [...composerRoot.querySelectorAll("img")].filter((img) => {
+          if (!isVisible(img)) return false;
+          const src = img.getAttribute('src') || '';
+          const alt = normalize(img.getAttribute('alt') || '');
+          if (src.startsWith('blob:')) return true;
+          if (src.includes('pbs.twimg.com/media')) return true;
+          if (alt.includes('image') || alt.includes('gorsel')) return true;
+          return false;
+        }).length
+      : 0;
+    const progressCount = document.querySelectorAll("[role='progressbar']").length;
+    const fileCount = input && input.files ? input.files.length : 0;
+    const inputValue = input ? (input.value || '') : '';
+
+    return {
+      file_count: fileCount,
+      has_value: !!String(inputValue || '').trim(),
+      preview_images: previewImages,
+      progress_count: progressCount,
+      media_button_count: mediaButtons.length,
+      media_button_sample: mediaButtons.slice(0, 4),
+      accepted: fileCount > 0 || !!String(inputValue || '').trim() || previewImages > 0 || progressCount > 0 || mediaButtons.length > 0
+    };
+    """
+    return driver.execute_script(js, list(_X_MEDIA_INPUT_SELECTORS))
+
+
 def _close_x_schedule_if_open(driver) -> bool:
     current_url = getattr(driver, "current_url", "") or ""
     if "/compose/post/schedule" not in current_url:
@@ -1691,7 +1810,14 @@ def _close_x_schedule_if_open(driver) -> bool:
 def _type_into_x_composer(message: str):
     driver = _get_driver()
     wait = WebDriverWait(driver, 12)
-    composer = wait.until(lambda current_driver: _locate_x_composer(current_driver))
+    try:
+        composer = wait.until(lambda current_driver: _locate_x_composer(current_driver))
+    except TimeoutException as exc:
+        readiness = _wait_for_x_content(timeout=3)
+        raise RuntimeError(
+            "X compose alani bulunamadi. "
+            + _describe_x_page(driver, readiness=readiness)
+        ) from exc
     ActionChains(driver).move_to_element(composer).click().perform()
     method = ""
     if _contains_non_bmp(message):
@@ -1760,22 +1886,35 @@ def _attach_media_to_x_composer(media_path: str) -> dict[str, Any]:
         raise FileNotFoundError(f"Medya dosyası bulunamadı: {abs_path}")
 
     wait = WebDriverWait(driver, 15)
-    media_input = wait.until(lambda current_driver: _locate_x_media_input(current_driver))
+    try:
+        media_input = wait.until(lambda current_driver: _locate_x_media_input(current_driver))
+    except TimeoutException as exc:
+        readiness = _wait_for_x_content(timeout=3)
+        raise RuntimeError(
+            "X medya yukleme input'u bulunamadi. "
+            + _describe_x_page(driver, readiness=readiness)
+        ) from exc
     media_input.send_keys(abs_path)
 
     def _media_selected(current_driver):
-        input_el = _locate_x_media_input(current_driver)
-        if input_el is None:
-            return False
-        value = (input_el.get_attribute("value") or "").strip()
-        return bool(value)
+        state = _read_x_media_attach_state(current_driver)
+        return state if state.get("accepted") else False
 
-    wait.until(_media_selected)
+    try:
+        media_state = wait.until(_media_selected)
+    except TimeoutException as exc:
+        state = _read_x_media_attach_state(driver)
+        raise RuntimeError(
+            "Medya dosyasi secildi ama X yukleme durumunu dogrulayamadim. "
+            + _describe_x_page(driver, readiness="compose")
+            + f", media_state={state!r}"
+        ) from exc
     time.sleep(2.0)
 
     return {
         "media_path": abs_path,
         "media_name": os.path.basename(abs_path),
+        "media_state": media_state,
     }
 
 
@@ -1936,8 +2075,7 @@ def publish_x_post(text: str) -> dict[str, Any]:
     if len(message) > 240:
         raise ValueError("Post metni 240 karakteri geçemez")
 
-    driver = _get_driver()
-    driver.get("https://x.com/compose/post")
+    driver = _ensure_x_compose_ready()
     _composer, type_method = _type_into_x_composer(message)
     result = _submit_x_composer()
     verification = _verify_x_submission(message, prefer_current_url=True)
@@ -1959,7 +2097,9 @@ def publish_x_post(text: str) -> dict[str, Any]:
 
 def publish_x_post_with_media(text: str, media_path: str) -> dict[str, Any]:
     """
-    X üzerinde görselli yeni bir post yayınlar.
+    X üzerinde görselli yeni bir post icin draft/composer hazirlar.
+    Son Post tusuna basmaz; bu adim agent tarafinda `submit_current_x_composer`
+    ile ayri yonetilmelidir.
 
     Args:
         text: Yayınlanacak metin. 240 karakteri geçmemesi önerilir.
@@ -1971,26 +2111,17 @@ def publish_x_post_with_media(text: str, media_path: str) -> dict[str, Any]:
     if len(message) > 240:
         raise ValueError("Post metni 240 karakteri geçemez")
 
-    driver = _get_driver()
-    driver.get("https://x.com/compose/post")
+    driver = _ensure_x_compose_ready()
     _composer, type_method = _type_into_x_composer(message)
     media_result = _attach_media_to_x_composer(media_path)
-    result = _submit_x_composer()
-    verification = _verify_x_submission(message, prefer_current_url=True)
-    resolved_tweet_url = verification.get("resolved_tweet_url") or (
-        _resolve_recent_status_url(driver, message, prefer_current_url=True)
-        if verification.get("verified")
-        else ""
-    )
     return {
-        "status": "posted" if verification["verified"] else verification["verification_state"],
+        "status": "draft_ready",
         "length": len(message),
         "text": message,
         "type_method": type_method,
-        "resolved_tweet_url": resolved_tweet_url,
+        "composer_url": driver.current_url,
+        "composer_title": driver.title,
         **media_result,
-        **verification,
-        **result,
     }
 
 
@@ -1998,6 +2129,7 @@ def submit_current_x_composer() -> dict[str, Any]:
     """
     X'te halihazırda açık olan compose/draft ekranındaki aktif Post/Reply butonuna basar.
     Metin ve medya zaten eklenmiş ama otomasyon son tuşa basamamışsa kurtarma aracı olarak kullan.
+    Bu araç sadece submit dener; doğrulama ve tweet URL çözme agent tarafından ayrı yapılmalıdır.
     """
     driver = _get_driver()
     composer = _locate_x_composer(driver)
@@ -2006,25 +2138,66 @@ def submit_current_x_composer() -> dict[str, Any]:
 
     message = (_read_element_value(driver, composer) or "").strip()
     result = _submit_x_composer()
-    verification = _verify_x_submission(message, prefer_current_url=True) if message else {
-        "attempted": True,
-        "verified": False,
-        "verification_state": "pending_verify",
-        "evidence": ["empty_or_unreadable_composer_text"],
-        "warning": "Composer metni okunamadığı için doğrulama sınırlı.",
-    }
-    resolved_tweet_url = verification.get("resolved_tweet_url") or (
-        _resolve_recent_status_url(driver, message, prefer_current_url=True)
-        if message and verification.get("verified")
-        else ""
-    )
     return {
-        "status": "posted" if verification.get("verified") else verification.get("verification_state", "pending_verify"),
+        "status": "submitted",
         "text": message,
         "length": len(message),
-        "resolved_tweet_url": resolved_tweet_url,
-        **verification,
         **result,
+    }
+
+
+def verify_current_x_submission(expected_text: str = "", prefer_current_url: bool = True) -> dict[str, Any]:
+    """
+    Son X submit denemesinin gercekten gidip gitmedigini dogrular.
+
+    Args:
+        expected_text: Beklenen post/reply metni. Bos ise mevcut composer metni okunmaya calisilir.
+        prefer_current_url: true ise mevcut sayfa URL'si oncelikli kanit olarak kullanilir.
+    """
+    driver = _get_driver()
+    message = (expected_text or "").strip()
+    if not message:
+        composer = _locate_x_composer(driver)
+        if composer is not None:
+            message = (_read_element_value(driver, composer) or "").strip()
+
+    if not message:
+        return {
+            "attempted": True,
+            "verified": False,
+            "verification_state": "pending_verify",
+            "evidence": ["empty_or_unreadable_composer_text"],
+            "warning": "Beklenen metin okunamadigi icin dogrulama sinirli.",
+            "error": "",
+        }
+
+    verification = _verify_x_submission(message, prefer_current_url=prefer_current_url)
+    verification["expected_text"] = message
+    return verification
+
+
+def resolve_recent_x_status_url(expected_text: str = "", prefer_current_url: bool = True) -> dict[str, Any]:
+    """
+    Son gonderilen X post/reply icin status URL'sini ayri olarak cozmeye calisir.
+
+    Args:
+        expected_text: Beklenen post/reply metni. Bos ise mevcut composer metni okunmaya calisilir.
+        prefer_current_url: true ise mevcut URL status pattern tasiyorsa once onu dener.
+    """
+    driver = _get_driver()
+    message = (expected_text or "").strip()
+    if not message:
+        composer = _locate_x_composer(driver)
+        if composer is not None:
+            message = (_read_element_value(driver, composer) or "").strip()
+
+    resolved_url = _resolve_recent_status_url(driver, message, prefer_current_url=prefer_current_url)
+    return {
+        "status": "resolved" if resolved_url else "not_found",
+        "expected_text": message,
+        "resolved_tweet_url": resolved_url,
+        "current_url": driver.current_url,
+        "title": driver.title,
     }
 
 

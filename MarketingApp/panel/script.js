@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
         activeTab: "dashboard",
         activeMemTab: "persona",
         activeSrcTab: "file",
+        activeCustomToolTab: "ai",
         selectedFilePath: null,
         pendingActionId: null,
         hierarchy: null,
@@ -50,6 +51,8 @@ document.addEventListener("DOMContentLoaded", () => {
             selectedAgentName: null,
             selectedCustomToolName: null,
             toolSearch: "",
+            packPath: "",
+            packPreview: null,
             editorDirty: false,
             customDirty: false,
             aiToolMessages: [],
@@ -63,6 +66,8 @@ document.addEventListener("DOMContentLoaded", () => {
         memNavItems: [...document.querySelectorAll(".mem-nav-item")],
         memPanes: [...document.querySelectorAll(".memory-pane")],
         srcTabs: [...document.querySelectorAll(".src-tab")],
+        customToolTabs: [...document.querySelectorAll(".custom-tool-tab")],
+        customToolPanes: [...document.querySelectorAll(".custom-tool-pane")],
         srcPanes: [...document.querySelectorAll(".src-sub-content")],
         currentTabTitle: document.getElementById("current-tab-title"),
         connectionState: document.getElementById("connection-state"),
@@ -175,11 +180,23 @@ document.addEventListener("DOMContentLoaded", () => {
         agentStudioNewAgent: document.getElementById("agent-studio-new-agent"),
         agentStudioSaveAgent: document.getElementById("agent-studio-save-agent"),
         agentStudioDeleteAgent: document.getElementById("agent-studio-delete-agent"),
+        agentStudioAgentCount: document.getElementById("agent-studio-agent-count"),
+        agentStudioActiveCount: document.getElementById("agent-studio-active-count"),
+        agentStudioCustomCount: document.getElementById("agent-studio-custom-count"),
+        agentStudioErrorCount: document.getElementById("agent-studio-error-count"),
         agentStudioAgentList: document.getElementById("agent-studio-agent-list"),
         agentStudioErrors: document.getElementById("agent-studio-errors"),
+        agentStudioPackList: document.getElementById("agent-studio-pack-list"),
+        agentStudioPackPath: document.getElementById("agent-studio-pack-path"),
+        agentStudioPackOverwrite: document.getElementById("agent-studio-pack-overwrite"),
+        agentStudioPackPreviewBtn: document.getElementById("agent-studio-pack-preview-btn"),
+        agentStudioPackInstallBtn: document.getElementById("agent-studio-pack-install-btn"),
+        agentStudioPackPreview: document.getElementById("agent-studio-pack-preview"),
         agentStudioName: document.getElementById("agent-studio-name"),
         agentStudioType: document.getElementById("agent-studio-type"),
+        agentStudioModelMode: document.getElementById("agent-studio-model-mode"),
         agentStudioModel: document.getElementById("agent-studio-model"),
+        agentStudioModelHint: document.getElementById("agent-studio-model-hint"),
         agentStudioEnabled: document.getElementById("agent-studio-enabled"),
         agentStudioDescription: document.getElementById("agent-studio-description"),
         agentStudioPrompt: document.getElementById("agent-studio-prompt"),
@@ -255,6 +272,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
         dom.srcTabs.forEach((item) => {
             item.addEventListener("click", () => switchSourceTab(item.dataset.src));
+        });
+
+        dom.customToolTabs.forEach((item) => {
+            item.addEventListener("click", () => switchCustomToolTab(item.dataset.customTab));
         });
 
         dom.saveApiBase.addEventListener("click", connectApiBase);
@@ -415,6 +436,11 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         dom.agentStudioSaveAgent.addEventListener("click", saveAgentStudioAgent);
         dom.agentStudioDeleteAgent.addEventListener("click", deleteAgentStudioAgent);
+        dom.agentStudioPackPreviewBtn.addEventListener("click", previewAgentStudioPack);
+        dom.agentStudioPackInstallBtn.addEventListener("click", installAgentStudioPack);
+        dom.agentStudioPackPath.addEventListener("input", () => {
+            state.agentStudio.packPath = dom.agentStudioPackPath.value;
+        });
         dom.agentStudioToolSearch.addEventListener("input", () => {
             state.agentStudio.toolSearch = dom.agentStudioToolSearch.value.trim().toLowerCase();
             const agent = getSelectedStudioAgent();
@@ -423,6 +449,7 @@ document.addEventListener("DOMContentLoaded", () => {
         [
             dom.agentStudioName,
             dom.agentStudioType,
+            dom.agentStudioModelMode,
             dom.agentStudioModel,
             dom.agentStudioEnabled,
             dom.agentStudioDescription,
@@ -430,14 +457,16 @@ document.addEventListener("DOMContentLoaded", () => {
         ].forEach((input) => {
             input.addEventListener("input", () => {
                 state.agentStudio.editorDirty = true;
-                if (input === dom.agentStudioType) {
+                if (input === dom.agentStudioType || input === dom.agentStudioModelMode) {
                     renderAgentStudioToolList(getSelectedStudioAgent());
+                    syncAgentStudioModelControls(getSelectedStudioAgent());
                 }
             });
             input.addEventListener("change", () => {
                 state.agentStudio.editorDirty = true;
-                if (input === dom.agentStudioType) {
+                if (input === dom.agentStudioType || input === dom.agentStudioModelMode) {
                     renderAgentStudioToolList(getSelectedStudioAgent());
+                    syncAgentStudioModelControls(getSelectedStudioAgent());
                 }
             });
         });
@@ -447,6 +476,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
             selectAgentStudioAgent(item.dataset.agentStudioSelect);
+        });
+        dom.agentStudioPackList.addEventListener("click", (event) => {
+            const item = event.target.closest("[data-agent-pack-select]");
+            if (!item) {
+                return;
+            }
+            const path = item.dataset.agentPackPath || "";
+            state.agentStudio.packPath = path;
+            dom.agentStudioPackPath.value = path;
         });
         dom.agentStudioToolList.addEventListener("change", (event) => {
             if (event.target.matches("input[type='checkbox']")) {
@@ -900,6 +938,7 @@ document.addEventListener("DOMContentLoaded", () => {
             agents: [],
             tools: [],
             custom_tools: [],
+            packs: [],
             errors: [],
             recommended_memory_tools: [],
         };
@@ -919,6 +958,13 @@ document.addEventListener("DOMContentLoaded", () => {
             return null;
         }
         return (catalog.custom_tools || []).find((tool) => tool.name === state.agentStudio.selectedCustomToolName) || null;
+    }
+
+    function getHierarchyAgent(name) {
+        if (!name) {
+            return null;
+        }
+        return (state.hierarchy?.submodels || []).find((agent) => agent.name === name) || null;
     }
 
     async function fetchAgentStudioCatalog({ silent = false } = {}) {
@@ -943,8 +989,10 @@ document.addEventListener("DOMContentLoaded", () => {
             state.agentStudio.selectedCustomToolName = customTools[0].name;
         }
 
+        renderAgentStudioOverview(catalog);
         renderAgentStudioAgentList(catalog);
         renderAgentStudioErrors(catalog.errors || []);
+        renderAgentStudioPackSurface(catalog);
 
         const selectedAgent = getSelectedStudioAgent();
         if (!state.agentStudio.editorDirty) {
@@ -957,6 +1005,27 @@ document.addEventListener("DOMContentLoaded", () => {
         const selectedCustomTool = getSelectedCustomTool();
         if (!state.agentStudio.customDirty) {
             renderCustomToolEditor(selectedCustomTool, false);
+        }
+    }
+
+    function renderAgentStudioOverview(catalog) {
+        const agents = catalog.agents || [];
+        const customTools = catalog.custom_tools || [];
+        const activeAgents = agents.filter((agent) => agent.enabled).length;
+        const visibleErrors = (catalog.errors || []).length
+            + customTools.filter((tool) => Boolean(tool.error)).length;
+
+        if (dom.agentStudioAgentCount) {
+            dom.agentStudioAgentCount.textContent = String(agents.length);
+        }
+        if (dom.agentStudioActiveCount) {
+            dom.agentStudioActiveCount.textContent = String(activeAgents);
+        }
+        if (dom.agentStudioCustomCount) {
+            dom.agentStudioCustomCount.textContent = String(customTools.length);
+        }
+        if (dom.agentStudioErrorCount) {
+            dom.agentStudioErrorCount.textContent = String(visibleErrors);
         }
     }
 
@@ -978,9 +1047,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const title = document.createElement("strong");
             title.textContent = agent.name;
             const meta = document.createElement("p");
+            const runtimeAgent = getHierarchyAgent(agent.name);
             const parts = [agent.type || "config", agent.enabled ? "aktif" : "pasif"];
             if (agent.model) {
-                parts.push(agent.model);
+                parts.push(`config:${agent.model}`);
+            }
+            if (runtimeAgent?.model) {
+                parts.push(`runtime:${runtimeAgent.model}`);
             }
             parts.push(`${agentSelectedToolNames(agent, catalog).length} tool`);
             meta.textContent = parts.join(" • ");
@@ -1010,6 +1083,89 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    function buildPackPreviewText(preview) {
+        if (!preview) {
+            return "Pack önizlemesi burada görünecek.";
+        }
+        const lines = [
+            `${preview.name} • ${preview.type} • v${preview.version || "0.1.0"}`,
+            preview.description || "Açıklama yok.",
+            `Kurulabilir: ${preview.installable ? "evet" : "hayır"}`,
+            `Agent: ${(preview.agents || []).length} • Tool: ${(preview.tools || []).length}`,
+        ];
+        if (preview.warnings?.length) {
+            lines.push("", "Uyarılar:");
+            preview.warnings.slice(0, 8).forEach((warning) => lines.push(`- ${warning}`));
+        }
+        if (preview.errors?.length) {
+            lines.push("", "Hatalar:");
+            preview.errors.slice(0, 8).forEach((error) => lines.push(`- ${error}`));
+        }
+        const tools = preview.tools || [];
+        if (tools.length) {
+            lines.push("", "Tool'lar:");
+            tools.slice(0, 8).forEach((tool) => {
+                lines.push(`- ${tool.name} • ${tool.export_ok ? "ok" : "hata"}${tool.error ? ` • ${tool.error}` : ""}`);
+            });
+        }
+        const agents = preview.agents || [];
+        if (agents.length) {
+            lines.push("", "Agent'lar:");
+            agents.slice(0, 8).forEach((agent) => {
+                lines.push(`- ${agent.name} • ${agent.type} • ${agent.model || "default"} • ${Array.isArray(agent.tools) ? agent.tools.length : 0} tool`);
+            });
+        }
+        return lines.join("\n");
+    }
+
+    function renderAgentStudioPackSurface(catalog) {
+        const packs = catalog.packs || [];
+        dom.agentStudioPackList.innerHTML = "";
+        if (!state.agentStudio.packPath) {
+            const firstPackPath = packs[0]?.source_path || packs[0]?.installed_path || "";
+            const samplePackPath = catalog.paths?.agent_packs_dir
+                ? `${catalog.paths.agent_packs_dir.replace(/\/+$/, "")}/ornek_haber_bundle`
+                : "";
+            if (firstPackPath) {
+                state.agentStudio.packPath = firstPackPath;
+            } else if (samplePackPath) {
+                state.agentStudio.packPath = samplePackPath;
+            }
+        }
+        dom.agentStudioPackPath.value = state.agentStudio.packPath || "";
+
+        if (packs.length === 0) {
+            dom.agentStudioPackList.innerHTML = '<div class="empty-copy">Henüz yüklü pack yok.</div>';
+        } else {
+            packs.forEach((pack) => {
+                const row = document.createElement("button");
+                row.type = "button";
+                row.className = "studio-list-item";
+                row.dataset.agentPackSelect = pack.name;
+                row.dataset.agentPackPath = pack.source_path || pack.installed_path || "";
+
+                const content = document.createElement("div");
+                const title = document.createElement("strong");
+                title.textContent = pack.name;
+                const meta = document.createElement("p");
+                meta.textContent = `${pack.type || "agent_bundle"} • v${pack.version || "0.1.0"}`;
+                const extra = document.createElement("div");
+                extra.className = "pack-list-meta";
+                extra.textContent = `${(pack.installed_agents || []).length} agent • ${(pack.installed_tools || []).length} tool`;
+                content.append(title, meta, extra);
+
+                const badge = document.createElement("span");
+                badge.className = "risk-badge risk-low";
+                badge.textContent = "pack";
+                row.append(content, badge);
+                dom.agentStudioPackList.appendChild(row);
+            });
+        }
+
+        dom.agentStudioPackPreview.classList.toggle("empty-copy", !state.agentStudio.packPreview);
+        dom.agentStudioPackPreview.textContent = buildPackPreviewText(state.agentStudio.packPreview);
+    }
+
     function renderAgentStudioEditor(agent, force = false) {
         if (state.agentStudio.editorDirty && !force) {
             return;
@@ -1026,13 +1182,76 @@ document.addEventListener("DOMContentLoaded", () => {
         dom.agentStudioName.disabled = !isNew;
         dom.agentStudioType.value = agent?.type || "config";
         dom.agentStudioType.disabled = !isNew;
-        dom.agentStudioModel.value = agent?.model || "default";
         dom.agentStudioEnabled.checked = agent?.enabled ?? true;
         dom.agentStudioDescription.value = agent?.description || "";
         dom.agentStudioPrompt.value = agent?.system_prompt || "";
         dom.agentStudioPrompt.placeholder = promptPlaceholder;
         dom.agentStudioDeleteAgent.disabled = isNew || agent?.type === "builtin";
+        syncAgentStudioModelControls(agent);
         renderAgentStudioToolList(agent);
+    }
+
+    function resolveAgentStudioModelConfig(agent) {
+        const configured = (agent?.model || "default").trim() || "default";
+        if (configured === "default" || configured === "browser_default") {
+            return { mode: configured, customModel: "" };
+        }
+        return { mode: "custom", customModel: configured };
+    }
+
+    function forceValidModelMode(mode, agentType) {
+        if (mode === "browser_default" && agentType !== "builtin") {
+            return "default";
+        }
+        if (mode === "custom" || mode === "default" || mode === "browser_default") {
+            return mode;
+        }
+        return "default";
+    }
+
+    function syncAgentStudioModelControls(agent = getSelectedStudioAgent()) {
+        const typeValue = dom.agentStudioType.value || agent?.type || "config";
+        const { mode, customModel } = resolveAgentStudioModelConfig(agent);
+        const runtimeAgent = getHierarchyAgent(agent?.name);
+        const editorMode = dom.agentStudioModelMode.value || mode;
+        const editorCustomModel = dom.agentStudioModel.value.trim();
+
+        Array.from(dom.agentStudioModelMode.options).forEach((option) => {
+            option.hidden = false;
+            option.disabled = false;
+        });
+
+        const browserOption = Array.from(dom.agentStudioModelMode.options).find((option) => option.value === "browser_default");
+        if (browserOption) {
+            const allowBrowserDefault = typeValue === "builtin" || mode === "browser_default";
+            browserOption.hidden = !allowBrowserDefault;
+            browserOption.disabled = !allowBrowserDefault;
+        }
+
+        const selectedMode = forceValidModelMode(
+            state.agentStudio.editorDirty ? editorMode : mode,
+            typeValue
+        );
+        const selectedCustomModel = state.agentStudio.editorDirty ? editorCustomModel : customModel;
+        const effectiveModel = runtimeAgent?.model || (
+            selectedMode === "custom" ? (selectedCustomModel || agent?.model || "default") : selectedMode
+        );
+        dom.agentStudioModelMode.value = selectedMode;
+        dom.agentStudioModel.value = selectedMode === "custom" ? selectedCustomModel : "";
+        dom.agentStudioModel.disabled = selectedMode !== "custom";
+        dom.agentStudioModel.placeholder = selectedMode === "custom"
+            ? "ornek: gemini-3.1-flash-lite-preview"
+            : "Custom Model secildiginde aktif olur";
+
+        const hintParts = [`Efektif runtime modeli: ${effectiveModel}`];
+        if (selectedMode === "default") {
+            hintParts.push("Subagent varsayilani kullanilir");
+        } else if (selectedMode === "browser_default") {
+            hintParts.push("Browser varsayilani kullanilir");
+        } else {
+            hintParts.push("Kaydedilince custom override uygulanir");
+        }
+        dom.agentStudioModelHint.textContent = hintParts.join(" • ");
     }
 
     function currentCheckedStudioTools() {
@@ -1121,12 +1340,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function collectAgentStudioPayload() {
+        const selectedMode = forceValidModelMode(
+            dom.agentStudioModelMode.value || "default",
+            dom.agentStudioType.value || "config"
+        );
+        const customModel = dom.agentStudioModel.value.trim();
+        const modelValue = selectedMode === "custom"
+            ? (customModel || "default")
+            : selectedMode;
         return {
             name: dom.agentStudioName.value.trim(),
             type: dom.agentStudioType.value || "config",
             enabled: dom.agentStudioEnabled.checked,
             description: dom.agentStudioDescription.value.trim(),
-            model: dom.agentStudioModel.value.trim() || "default",
+            model: modelValue,
             tool_mode: "custom",
             system_prompt: dom.agentStudioPrompt.value,
             tools: [...currentCheckedStudioTools()],
@@ -1201,6 +1428,75 @@ document.addEventListener("DOMContentLoaded", () => {
             toast(result.restart_required ? "Config kaydedildi; uygulama restart bekliyor." : "Agent runtime yeniden yüklendi.", "success");
         } catch (error) {
             toast(`Agent runtime yenilenemedi: ${error.message}`, "error");
+        }
+    }
+
+    async function previewAgentStudioPack() {
+        const path = dom.agentStudioPackPath.value.trim();
+        if (!path) {
+            toast("Önce pack klasör yolunu gir.", "error");
+            return;
+        }
+        try {
+            dom.agentStudioPackPreviewBtn.disabled = true;
+            state.agentStudio.packPath = path;
+            state.agentStudio.packPreview = null;
+            renderAgentStudioPackSurface(getStudioCatalog());
+            const result = await apiRequest("/agent-studio/packs/preview", {
+                method: "POST",
+                body: { path },
+                timeout: 25000,
+            });
+            state.agentStudio.packPreview = result.preview || null;
+            renderAgentStudioPackSurface(getStudioCatalog());
+            toast("Pack preview hazır.", "success");
+        } catch (error) {
+            state.agentStudio.packPreview = {
+                name: "preview_failed",
+                version: "0.0.0",
+                type: "agent_bundle",
+                description: "",
+                installable: false,
+                agents: [],
+                tools: [],
+                warnings: [],
+                errors: [error.message],
+            };
+            renderAgentStudioPackSurface(getStudioCatalog());
+            toast(`Pack preview başarısız: ${error.message}`, "error");
+        } finally {
+            dom.agentStudioPackPreviewBtn.disabled = false;
+        }
+    }
+
+    async function installAgentStudioPack() {
+        const path = dom.agentStudioPackPath.value.trim();
+        if (!path) {
+            toast("Önce pack klasör yolunu gir.", "error");
+            return;
+        }
+        try {
+            dom.agentStudioPackInstallBtn.disabled = true;
+            const result = await apiRequest("/agent-studio/packs/install", {
+                method: "POST",
+                body: {
+                    path,
+                    overwrite: dom.agentStudioPackOverwrite.checked,
+                },
+                timeout: 40000,
+            });
+            state.agentStudio.catalog = result.catalog || state.agentStudio.catalog;
+            if (result.hierarchy) {
+                state.hierarchy = result.hierarchy;
+                renderHierarchy(result.hierarchy);
+            }
+            state.agentStudio.packPreview = null;
+            renderAgentStudio();
+            toast(result.restart_required ? "Pack kuruldu; runtime görmek için restart gerekebilir." : "Pack kuruldu ve runtime'a bağlandı.", "success");
+        } catch (error) {
+            toast(`Pack kurulamadı: ${error.message}`, "error");
+        } finally {
+            dom.agentStudioPackInstallBtn.disabled = false;
         }
     }
 
@@ -1967,6 +2263,12 @@ document.addEventListener("DOMContentLoaded", () => {
         state.activeSrcTab = srcId;
         dom.srcTabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.src === srcId));
         dom.srcPanes.forEach((pane) => pane.classList.toggle("active", pane.id === `src-content-${srcId}`));
+    }
+
+    function switchCustomToolTab(tabId) {
+        state.activeCustomToolTab = tabId || "ai";
+        dom.customToolTabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.customTab === state.activeCustomToolTab));
+        dom.customToolPanes.forEach((pane) => pane.classList.toggle("active", pane.id === `custom-tool-pane-${state.activeCustomToolTab}`));
     }
 
     function syncSelectedFile() {

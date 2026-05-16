@@ -161,6 +161,15 @@ class AgentStudioCustomToolGeneratePayload(PydanticBaseModel):
     current_code: str = ""
     conversation: list[dict[str, str]] = []
 
+
+class AgentStudioPackPreviewPayload(PydanticBaseModel):
+    path: str
+
+
+class AgentStudioPackInstallPayload(PydanticBaseModel):
+    path: str
+    overwrite: bool = False
+
 def set_base_model(bm):
     global _base_model
     _base_model = bm
@@ -239,9 +248,11 @@ def _load_agent_studio_helpers():
             AgentStudioError,
             create_builtin_agent_scaffold,
             delete_agent_config,
+            install_agent_pack,
             load_agent_studio_catalog,
             load_custom_tool_callable,
             load_custom_tools_config,
+            preview_agent_pack,
             upsert_agent_config,
             upsert_custom_tool,
             validate_tool_name,
@@ -253,9 +264,11 @@ def _load_agent_studio_helpers():
         "AgentStudioError": AgentStudioError,
         "create_builtin_agent_scaffold": create_builtin_agent_scaffold,
         "delete_agent_config": delete_agent_config,
+        "install_agent_pack": install_agent_pack,
         "load_agent_studio_catalog": load_agent_studio_catalog,
         "load_custom_tool_callable": load_custom_tool_callable,
         "load_custom_tools_config": load_custom_tools_config,
+        "preview_agent_pack": preview_agent_pack,
         "upsert_agent_config": upsert_agent_config,
         "upsert_custom_tool": upsert_custom_tool,
         "validate_tool_name": validate_tool_name,
@@ -296,7 +309,7 @@ def _build_tool_generator_live_context(helpers: dict[str, Any]) -> str:
         "",
         "Onemli yollar:",
     ]
-    for key in ("agents_config", "custom_tools_config", "custom_tools_dir", "submodels_dir", "submodels_init", "model_env"):
+    for key in ("agents_config", "custom_tools_config", "agent_packs_config", "custom_tools_dir", "agent_packs_dir", "submodels_dir", "submodels_init", "model_env"):
         value = paths.get(key)
         if value:
             lines.append(f"- {key}: {value}")
@@ -365,6 +378,17 @@ def _build_tool_generator_live_context(helpers: dict[str, Any]) -> str:
             )
     else:
         lines.append("- Henuz custom tool yok.")
+
+    packs = catalog.get("packs") if isinstance(catalog.get("packs"), list) else []
+    lines.extend(["", "Yuklu pack katalogu:"])
+    if packs:
+        for item in packs[:24]:
+            lines.append(
+                f"- {item.get('name')} | type={item.get('type', 'agent_bundle')} | version={item.get('version', '0.1.0')} "
+                f"| agents={len(item.get('installed_agents') or [])} | tools={len(item.get('installed_tools') or [])}"
+            )
+    else:
+        lines.append("- Henuz yuklu pack yok.")
 
     if errors:
         lines.extend(["", "Katalog hatalari/uyarilari:"])
@@ -625,6 +649,7 @@ def _build_agent_studio_snapshot() -> dict[str, Any]:
             "agents": [],
             "tools": [],
             "custom_tools": [],
+            "packs": [],
             "recommended_memory_tools": [],
             "paths": {},
             "errors": [{"scope": "agent_studio", "message": str(exc.detail)}],
@@ -810,6 +835,36 @@ async def get_agent_studio_catalog():
     payload = _build_agent_studio_snapshot()
     payload["hierarchy"] = _base_model.get_hierarchy() if _base_model else {"tools": [], "submodels": []}
     return payload
+
+
+@app.post("/api/agent-studio/packs/preview")
+async def preview_agent_studio_pack(data: AgentStudioPackPreviewPayload):
+    helpers = _load_agent_studio_helpers()
+    try:
+        preview = helpers["preview_agent_pack"](data.path)
+    except helpers["AgentStudioError"] as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "success", "preview": preview}
+
+
+@app.post("/api/agent-studio/packs/install")
+async def install_agent_studio_pack(data: AgentStudioPackInstallPayload):
+    helpers = _load_agent_studio_helpers()
+    try:
+        result = helpers["install_agent_pack"](data.path, overwrite=bool(data.overwrite))
+    except helpers["AgentStudioError"] as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    hierarchy = None
+    if _base_model and hasattr(_base_model, "reload_agent_studio"):
+        hierarchy = _base_model.reload_agent_studio()
+    return {
+        "status": "success",
+        "pack": result.get("pack"),
+        "catalog": _build_agent_studio_snapshot(),
+        "hierarchy": hierarchy,
+        "restart_required": _base_model is None,
+    }
 
 
 @app.post("/api/agent-studio/agents")

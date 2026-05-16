@@ -115,6 +115,8 @@ try:
         publish_x_post,
         publish_x_post_with_media,
         submit_current_x_composer,
+        verify_current_x_submission,
+        resolve_recent_x_status_url,
         publish_x_thread,
         reply_to_x_post,
         mark_queue_item,
@@ -157,6 +159,8 @@ except Exception as social_import_error:
     publish_x_post = _missing_tool("publish_x_post", social_import_error)
     publish_x_post_with_media = _missing_tool("publish_x_post_with_media", social_import_error)
     submit_current_x_composer = _missing_tool("submit_current_x_composer", social_import_error)
+    verify_current_x_submission = _missing_tool("verify_current_x_submission", social_import_error)
+    resolve_recent_x_status_url = _missing_tool("resolve_recent_x_status_url", social_import_error)
     publish_x_thread = _missing_tool("publish_x_thread", social_import_error)
     reply_to_x_post = _missing_tool("reply_to_x_post", social_import_error)
     mark_queue_item = _missing_tool("mark_queue_item", social_import_error)
@@ -300,6 +304,8 @@ SOSYAL_MEDYA_ARACLARI = [
     publish_x_post,
     publish_x_post_with_media,
     submit_current_x_composer,
+    verify_current_x_submission,
+    resolve_recent_x_status_url,
     publish_x_thread,
     reply_to_x_post,
     mark_queue_item,
@@ -323,6 +329,27 @@ SOSYAL_MEDYA_ARACLARI = [
     workspace_yaz,
     workspace_ekle,
     workspace_listele,
+    # --- Browser fallback (son post/reply tusu, DOM teyidi, kurtarma) ---
+    browser_baglan,
+    browser_git,
+    browser_dom_oku,
+    browser_hizli_durum_oku,
+    browser_ilgili_bolumleri_getir,
+    browser_bul,
+    browser_click_text,
+    browser_click_role,
+    browser_click_id,
+    browser_click_css,
+    browser_type_placeholder,
+    browser_type_id,
+    browser_type_css,
+    browser_enter_bas,
+    browser_scroll,
+    browser_eleman_bekle,
+    browser_bekle,
+    browser_sekme_listele,
+    browser_sekme_degistir,
+    browser_screenshot,
 ]
 
 SISTEM_ARACLARI = [

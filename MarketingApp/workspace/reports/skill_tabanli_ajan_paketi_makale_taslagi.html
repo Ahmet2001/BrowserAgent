@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skill Tabanli Ajan Paketi Uretimi</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --paper: #ffffff;
+      --text: #18202a;
+      --muted: #5b6574;
+      --line: #d8e0ea;
+      --accent: #2557d6;
+      --code-bg: #f0f4f8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #eef3fb 0%, #f8fafc 100%);
+      color: var(--text);
+      font: 17px/1.72 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .page {
+      max-width: 920px;
+      margin: 40px auto;
+      padding: 56px 72px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      box-shadow: 0 18px 60px rgba(16, 24, 40, 0.08);
+    }
+    .meta {
+      margin-bottom: 28px;
+      color: var(--muted);
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    h1 { font-size: 34px; line-height: 1.22; margin: 0 0 18px; }
+    h2 { font-size: 24px; line-height: 1.3; margin: 38px 0 14px; padding-top: 8px; border-top: 1px solid var(--line); }
+    h3 { font-size: 19px; line-height: 1.35; margin: 26px 0 10px; color: #111827; }
+    p { margin: 0 0 15px; text-align: justify; }
+    ul { margin: 10px 0 18px 22px; padding: 0; }
+    ul.numbered { list-style: decimal; }
+    li { margin: 6px 0; }
+    blockquote {
+      margin: 18px 0;
+      padding: 14px 18px;
+      border-left: 4px solid var(--accent);
+      background: #f7faff;
+      color: #243447;
+    }
+    code {
+      background: var(--code-bg);
+      border: 1px solid #d9e2ec;
+      padding: .12rem .38rem;
+      border-radius: 6px;
+      font: .92em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    strong { color: #0f172a; }
+    .footer {
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+    @media print {
+      body { background: #fff; }
+      .page { margin: 0; box-shadow: none; border: none; max-width: none; padding: 24px 32px; }
+      h2 { break-after: avoid; }
+      p, li { break-inside: avoid; }
+    }
+    @media (max-width: 760px) {
+      .page { margin: 0; padding: 28px 20px 40px; border: none; box-shadow: none; }
+      h1 { font-size: 28px; }
+      h2 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="meta">Makale Taslagi · MarketingApp Research Notes</div>
+    <h1>Skill Tabanli Ajan Paketi Uretimi ile Birlikte Calisabilir Ajan Ekosistemleri</h1>
+<h2>Ozet</h2>
+<p>Buyuk dil modelleri ile gelistirilen ajan sistemleri son donemde hizla yayginlasmis olsa da, bu sistemlerin buyuk bolumu ya kapali ve sabit agent mimarilerine dayanmakta ya da yeni agent ve tool ekleme surecinde yuksek duzeyde manuel muhendislik gerektirmektedir. Ozellikle son kullanicinin veya yaratici gelistiricinin disarida uretilen bir agent&#x27;i, onunla birlikte gelen tool&#x27;lari ve gorev mantigini mevcut bir orkestrasyon katmanina tak-calistir biciminde baglayabilmesi halen zor bir problemdir. Bu calismada, bu probleme yonelik olarak skill tabanli bir kontrat yaklasimi onerilmektedir. Onerilen yaklasimda LLM&#x27;e serbest bir kod uretim gorevi verilmek yerine, belirli klasor yapisi, manifest kurallari, tool kontrati, agent tanim semasi ve dogrulama kontrol listesi iceren bir <code>SKILL.md</code> uzerinden disaridan import edilebilir <code>Tool Pack</code>, <code>Agent Bundle</code> ve <code>Runtime Pack</code> uretilmesi saglanir. Bu yapi, Agent Studio benzeri bir orkestrasyon paneli ile birlikte calisarak hem kodsuz agent tasarimini hem de moduler genislemeyi destekler. Calisma, bu skill tabanli kontrat mekanizmasinin ilk denemede gecerli paket uretme oranini, entegrasyon basarisini ve insan mudahalesi ihtiyacini iyilestirebilecegini savunmaktadir. Makale; sistem modelini, mimari bilesenleri, deneysel hipotezleri ve potansiyel ticari ve akademik etkileri tartismaktadir.</p>
+<p><strong>Anahtar Kelimeler:</strong> agentic systems, interoperability, tool calling, no-code agent design, contract-guided generation, multi-agent orchestration</p>
+<h2>1. Giris</h2>
+<p>LLM tabanli arac kullanan ajanlar; icerik uretimi, arastirma, browser otomasyonu ve sosyal medya operasyonlari gibi alanlarda giderek daha yetkin hale gelmektedir. Buna ragmen pratikte iki temel darboğaz devam etmektedir. Birincisi, ajanlarin cogu kapali ve sabit mimariler uzerine kuruludur; yeni bir uzman ajan eklemek veya yeni bir tool&#x27;u sisteme baglamak icin dogrudan kod duzeyinde degisiklik gerekmektedir. Ikincisi, disaridaki baska bir model ya da gelistirici tarafindan uretilen bir agent paketinin var olan orkestrasyona uyumlu bicimde baglanmasi icin ortak bir paketleme standardi bulunmamaktadir.</p>
+<p>Bu eksiklikler, LLM ajan ekosistemlerinin olgunlasmasinin onundeki temel engellerden biridir. Bugun bircok sistem &quot;agent builder&quot; veya &quot;custom tool&quot; vaadi sunsa da, ortaya cikan yapilar genellikle platforma ozel, dokumantasyon-bagimli ve elle toparlanmasi gereken daginik ciktilar uretmektedir. Bu nedenle son kullanicinin veya teknik olmayan ekiplerin kendi uzman ajanlarini olusturmasi teoride mumkun gorunse de pratikte yuksek hata orani ve yogun manuel muhendislik ihtiyaci ortaya cikmaktadir.</p>
+<p>Bu calisma, bu sorunu &quot;skill tabanli kontrat&quot; kavrami ile ele almaktadir. Temel fikir, disaridaki bir LLM&#x27;den &quot;bana bir ajan yarat&quot; seklinde serbest bir kod uretimi istemek yerine, o modele Agent Studio ile uyumlu bir paket nasil olusturulmasi gerektigini anlatan resmi bir <code>SKILL.md</code> vermektir. Bu skill, paket tiplerini, klasor yapisini, manifest semasini, tool dosya kurallarini, prompt dosyalarini, env beklentilerini ve son dogrulama adimlarini belirleyen bir uretim kontrati olarak gorev yapar.</p>
+<p>Bu sayede sistem sadece agent ureten degil, <strong>birlikte calisabilir agent paketleri uretilebilen bir ajan ekosistemi</strong> haline gelir.</p>
+<h2>2. Problem Tanimi</h2>
+<p>Bu calismada ele alinan temel problem su sekilde ifade edilebilir:</p>
+<blockquote>
+<p>Dogal dil girdisi veya yuksek seviyeli bir gorev tanimi uzerinden, var olan bir orkestrasyon</p>
+<p>katmanina guvenli ve tutarli sekilde baglanabilen import edilebilir agent ve tool paketleri</p>
+<p>nasil uretilebilir?</p>
+</blockquote>
+<p>Bu problemin alt zorluklari sunlardir:</p>
+<ul class="numbered">
+<li><strong>Semantik daginiklik:</strong> LLM ayni ihtiyac icin farkli klasor yapilari ve farkli metadata</li>
+<p>formatlari uretebilir.</p>
+<li><strong>Kontrat eksikligi:</strong> Tool fonksiyonlari, agent manifestleri ve prompt dosyalari</li>
+<p>arasinda ortak sema olmayinca import katmani kirilgan hale gelir.</p>
+<li><strong>Orkestrasyon uyumsuzlugu:</strong> Disarida uretilen agent, mevcut tool registry, memory</li>
+<p>policy veya runtime yukleme akisi ile uyumlu olmayabilir.</p>
+<li><strong>Yuksek manuel duzeltme maliyeti:</strong> Kullanici her yeni bundle icin kodu tek tek gozden</li>
+<p>gecirmek ve duzeltmek zorunda kalir.</p>
+<li><strong>Guvenlik ve risk yonetimi:</strong> Ozellikle custom Python tool&#x27;larin kontrolsuz import&#x27;u</li>
+<p>sisteme operasyonel ve guvenlik riskleri tasiyabilir.</p>
+</ul>
+<p>Dolayisiyla problem yalnizca &quot;bir agent yaratmak&quot; degil, <strong>import edilebilir, dogrulanabilir, moduler ve birlikte calisabilir agent paketleri yaratmak</strong>tir.</p>
+<h2>3. Calismanin Katkilari</h2>
+<p>Bu makalenin temel katkilarini su sekilde ozetliyoruz:</p>
+<ul class="numbered">
+<li><strong>Skill tabanli paket kontrati:</strong> Agent bundle uretimi icin LLM&#x27;e verilen resmi bir</li>
+<p>uretim skill&#x27;i tanimlanmistir.</p>
+<li><strong>Paket tipleri icin acik ayrim:</strong> <code>Tool Pack</code>, <code>Agent Bundle</code> ve <code>Runtime Pack</code></li>
+<p>kategorileri ile farkli kullanici ve teknik seviye ihtiyaclari ayrilmistir.</p>
+<li><strong>Deterministik klasor ve manifest semasi:</strong> LLM tarafindan uretilen ciktilarin parse</li>
+<p>edilebilir olmasi icin zorunlu klasor yapisi ve metadata alanlari tanimlanmistir.</p>
+<li><strong>No-code ile agent ekosistemi arasinda kopru:</strong> Son kullanicinin kendi agent sistemini</li>
+<p>disaridaki bir LLM yardimiyla urettirip mevcut orchestrator&#x27;a baglayabilmesi hedeflenmistir.</p>
+<li><strong>Deneysel olarak test edilebilir hipotezler:</strong> Bu yaklasimin gecerliligi, import basarisi,</li>
+<p>ilk denemede dogruluk ve insan mudahalesi maliyeti gibi olculerle test edilebilir hale getirilmistir.</p>
+</ul>
+<h2>4. Sistem Modeli</h2>
+<p>Onerilen mimari dort ana katmandan olusur:</p>
+<h3>4.1 Orkestrasyon Katmani</h3>
+<p>Bu katman BaseModel veya ana orchestrator olarak dusunulebilir. Gorevi:</p>
+<ul>
+<li>aktif submodel&#x27;lari yuklemek,</li>
+<li>tool schema&#x27;larini olusturmak,</li>
+<li>uygun agent&#x27;a gorev devretmek,</li>
+<li>memory ve context okuma araclarini yonetmek,</li>
+<li>calisma zamani hata toparlama ve durum loglamasini saglamaktir.</li>
+</ul>
+<h3>4.2 Agent Studio Katmani</h3>
+<p>Agent Studio, kullanicinin kod yazmadan agent tanimlayabildigi, tool baglayabildigi ve runtime davranisini yonetebildigi panel katmanidir. Mevcut yapida config-driven agent tanimi, custom tool ekleme ve agent aktif/pasif yonetimi desteklenmektedir. Bu calisma ile Agent Studio&#x27;nun bir sonraki evrimi olarak import edilebilir paketleri kabul eden bir <code>Import Pack Preview</code> ve <code>Bind to Orchestrator</code> akisina gecis hedeflenmektedir.</p>
+<h3>4.3 Skill Tabanli Uretim Katmani</h3>
+<p>Bu katmanin merkezinde <code>SKILL.md</code> bulunur. Skill&#x27;in gorevi, disaridaki bir LLM&#x27;in serbest kod uretmesini engelleyip onu belirli bir kontrata baglamaktir. Skill icerigi:</p>
+<ul>
+<li>paket tipleri,</li>
+<li>klasor yapisi,</li>
+<li>manifest kurallari,</li>
+<li>tool fonksiyon kontrati,</li>
+<li>agent manifest semasi,</li>
+<li>prompt dosya konvansiyonlari,</li>
+<li>env kurallari,</li>
+<li>test ve validasyon kontrol listesi</li>
+</ul>
+<p>gibi bilesenleri tanimlar.</p>
+<h3>4.4 Import ve Validasyon Katmani</h3>
+<p>Bu katman gelecekteki runtime baglama surecini yonetecektir. Beklenen gorevleri:</p>
+<ul>
+<li><code>plugin.yaml</code> parse etme,</li>
+<li>agent ve tool entrypoint&#x27;lerini dogrulama,</li>
+<li>env ve dependency ihtiyaclarini listeleme,</li>
+<li>risk seviyesini raporlama,</li>
+<li>paketi registry&#x27;ye kaydetme,</li>
+<li>aktif hale getirmeden once kullaniciya preview sunma</li>
+</ul>
+<p>seklindedir.</p>
+<h2>5. Skill Tabanli Kontrat Yaklasimi</h2>
+<p>Onerilen yaklasimda <code>SKILL.md</code>, klasik anlamda &quot;yardimci dokuman&quot; degil, <strong>programatik uretim kontrati</strong> olarak rol oynar. Bu kontratin iki yonlu etkisi vardir.</p>
+<p>Birinci etki, LLM uretimini belirli kisitlara baglayarak ciktiyi standardize etmesidir. Boylece modelin keyfi klasor yapisi, tutarsiz metadata ya da agent ve tool arasinda kopuk referanslar uretme olasiligi azalir.</p>
+<p>Ikinci etki, import katmaninin da ne beklemesi gerektigini netlestirmesidir. Cunku skill ile belirlenen sema, daha sonra runtime tarafinda manifest parser, tool loader ve registry katmani icin resmi bir giris formatina donusur.</p>
+<p>Bu nedenle <code>SKILL.md</code>, yalnizca LLM&#x27;i yonlendiren bir prompt artefakti degil; ayni zamanda gelecekteki plugin ekosisteminin semantik protokoludur.</p>
+<h3>5.1 Paket Tipleri</h3>
+<p><strong>Tool Pack:</strong> Sadece tool saglar. Mevcut agent&#x27;larin kapasitesini genisletmek icin idealdir.</p>
+<p><strong>Agent Bundle:</strong> Config tabanli ajan + secili tool listesi saglar. Varsayilan ve onerilen paket tipidir.</p>
+<p><strong>Runtime Pack:</strong> Ozel Python submodel mantigi gerektiren, ileri seviye ve daha riskli paket tipidir.</p>
+<p>Bu ayrim, farkli teknik yetkinlik duzeyleri icin farkli giris noktalarina izin verir.</p>
+<h3>5.2 Deterministik Dosya Yapisi</h3>
+<p>Her paketin asgari olarak <code>plugin.yaml</code>, <code>README.md</code>, <code>env.example</code>, <code>tools/</code>, <code>agents/</code>, <code>prompts/</code> ve <code>tests/</code> bilesenlerine sahip olmasi istenir. Bu sayede hem insan incelemesi hem de otomatik validasyon ayni sabit giris noktalari uzerinden calisabilir.</p>
+<h3>5.3 Tool Kontrati</h3>
+<p>Tool&#x27;lar icin tekil fonksiyon export&#x27;u, ad eslesmesi, tip anotasyonu ve yan etki sinirlari tanimlanmistir. Bu, LLM tarafindan uretilebilecek daginik veya side-effect agir kodun azaltilmasina yardimci olur.</p>
+<h3>5.4 Agent Manifesti</h3>
+<p>Config-driven agent tanimi; model secimi, system prompt yolu, tool listesi, memory araclari ve etiketler gibi alanlarla desteklenir. Boylece yeni bir uzman ajan, mevcut orchestrator&#x27;a uyumlu bir metadata ile tarif edilir.</p>
+<h2>6. Arastirma Hipotezleri</h2>
+<p>Bu yaklasim icin asagidaki hipotezler kurulabilir:</p>
+<p><strong>H1:</strong> Skill tabanli kontrat ile yonlendirilen LLM&#x27;ler, serbest formatta uretilen paketlere gore daha yuksek ilk denemede gecerli paket uretme oranina sahiptir.</p>
+<p><strong>H2:</strong> Skill tabanli paket uretimi, eksik manifest, bozuk dosya yapisi ve uydurma tool ismi gibi yapisal hatalari anlamli bicimde azaltir.</p>
+<p><strong>H3:</strong> Skill tabanli paketler, orkestrasyon sistemine baglanmadan once daha az manuel duzeltme gerektirir.</p>
+<p><strong>H4:</strong> Skill tabanli uretilmis bundle&#x27;larin import sonrasi gorev basari orani, serbest formatta uretilmis bundle&#x27;lardan daha yuksektir.</p>
+<p><strong>H5:</strong> Paket tipi ayrimi (<code>Tool Pack</code>, <code>Agent Bundle</code>, <code>Runtime Pack</code>), son kullanici ile gelistirici arasindaki teknik esigi dusurur ve farkli yetkinlik profillerinde daha yuksek kullanilabilirlik saglar.</p>
+<h2>7. Deney Tasarimi</h2>
+<h3>7.1 Karsilastirma Kurulumu</h3>
+<p>Uc ana deney grubu kurgulanabilir:</p>
+<ul class="numbered">
+<li><strong>Serbest Uretim Grubu:</strong> LLM&#x27;den yalnizca dogal dil ile bundle uretmesi istenir.</li>
+<li><strong>Dokumantasyon Grubu:</strong> LLM&#x27;e yalnizca genel teknik gereksinimler verilir.</li>
+<li><strong>Skill Tabanli Grup:</strong> LLM&#x27;e resmi <code>SKILL.md</code> verilerek bundle uretmesi istenir.</li>
+</ul>
+<h3>7.2 Gorevler</h3>
+<p>Her grup icin benzer zorlukta su gorevler verilebilir:</p>
+<ul>
+<li>yeni bir haber cekme tool&#x27;u uretmek,</li>
+<li>yeni bir content agent bundle&#x27;i uretmek,</li>
+<li>memory okuyan bir social analysis agent&#x27;i tanimlamak,</li>
+<li>env gerektiren bir dis API tool&#x27;u eklemek,</li>
+<li>prompt + manifest + tool uyumu olan import edilebilir bir bundle hazirlamak.</li>
+</ul>
+<h3>7.3 Olcumler</h3>
+<p>Nicel olculer:</p>
+<ul>
+<li>first-pass valid package rate</li>
+<li>import success rate</li>
+<li>schema compliance score</li>
+<li>manual correction count</li>
+<li>time-to-integration</li>
+<li>unresolved dependency count</li>
+<li>hallucinated tool name count</li>
+</ul>
+<p>Nitel olculer:</p>
+<ul>
+<li>dosya yapisinin okunabilirligi</li>
+<li>manifestlerin anlasilabilirligi</li>
+<li>agent ve tool arasindaki tutarlilik</li>
+<li>son kullanici tarafindan algilanan kurulum kolayligi</li>
+</ul>
+<h3>7.4 Sonraki Asama Olcumu</h3>
+<p>Import edilen paketler daha sonra gercek gorevlerde de olculmelidir:</p>
+<ul>
+<li>agent gorevi tamamlayabiliyor mu,</li>
+<li>yalnizca tanimlandigi tool&#x27;lari kullaniyor mu,</li>
+<li>memory policy&#x27;ye uyuyor mu,</li>
+<li>hata durumlarinda beklenen sinirlarda kaliyor mu.</li>
+</ul>
+<h2>8. Tartisma</h2>
+<p>Bu calismanin onemli bir iddiasi, LLM ekosistemlerinde standardizasyonun yalnizca runtime katmaninda degil, <strong>uretim asamasinda</strong> da kurulmasi gerektigidir. Geleneksel yazilim muhendisliginde API semalari, interface&#x27;ler ve package manager&#x27;lar nasil birlikte calisabilirligi sagliyorsa, agent ekosistemlerinde de benzer bir role <code>SKILL.md</code> gibi kontrat belgeleri ustlenebilir.</p>
+<p>Bu yaklasim ayrica no-code ve low-code agent tasarimi alanina da yeni bir katkida bulunur. Cunku burada kullanici agent&#x27;i dogrudan elle kodlamaz; fakat tamamen serbest de birakilmaz. Onun yerine, standardize edilmis bir uretim protokolu kullanan ikinci bir zekaya is devreder. Bu model, insan-LMM-LMM isbirliginin dikkat cekici bir ornegidir.</p>
+<p>Ticari acidan bakildiginda bu fikir, yalnizca &quot;agent builder&quot; degil, <strong>agent marketplace</strong> veya <strong>importable bundle ecosystem</strong> gibi daha buyuk bir urun stratejisine kapı acar. Akademik acidan ise birlikte calisabilirlik, kontrat tabanli uretim ve moduler ajan ekosistemleri gibi guncel arastirma alanlariyla kesismektedir.</p>
+<h2>9. Sinirliliklar</h2>
+<p>Bu calismanin bazi sinirliliklari vardir:</p>
+<ul class="numbered">
+<li>Skill tabanli kontrat, modeli tamamen hatasiz hale getirmez; yalnizca hata uzayini daraltir.</li>
+<li>Runtime Pack gibi ileri seviye paketlerde guvenlik ve sandbox ihtiyaci daha belirgindir.</li>
+<li>Paket formatinin cok katı hale gelmesi yaratici esnekligi azaltabilir.</li>
+<li>Import validasyonu guclu olmadigi surece tek basina <code>SKILL.md</code> yeterli olmaz.</li>
+<li>Paket dogrulugu ile gercek gorev basarisi her zaman ayni sey degildir; iyi paketlenen bir</li>
+<p>agent yine de zayif davranis sergileyebilir.</p>
+</ul>
+<p>Bu nedenle skill tabanli kontrat, tek basina cozum degil; <strong>uretim standardi + import validasyonu + runtime guardrails</strong> ucgeninin ilk bilesenidir.</p>
+<h2>10. Etik ve Guvenlik Boyutu</h2>
+<p>Disaridan import edilen tool ve agent&#x27;larin calisma zamani riskleri goz ardi edilmemelidir. Ozellikle Python tabanli custom tool&#x27;lar dosya sistemi, ag erisimi veya otomasyon yuzeyleri uzerinden beklenmeyen etkiler olusturabilir. Bu nedenle:</p>
+<ul>
+<li>risk seviyelendirmesi,</li>
+<li>dependency ve env gorunurlugu,</li>
+<li>trusted vs sandboxed package ayrimi,</li>
+<li>acik aktiflestirme adimi,</li>
+<li>audit log ve action trace</li>
+</ul>
+<p>gibi mekanizmalar import mimarisinin ayrilmaz parcasi olmalidir.</p>
+<h2>11. Sonuc</h2>
+<p>Bu makalede, LLM tabanli agent ekosistemleri icin skill tabanli kontratlarla disaridan import edilebilir ajan paketleri uretme yaklasimi sunulmustur. Onerilen model, sadece yeni ajan tanimlamayi degil, bu ajanlari birlikte calisabilir, parse edilebilir ve orchestration katmanina baglanabilir yapilar olarak ele alir. <code>SKILL.md</code> burada yardimci bir prompttan daha fazlasi olarak, agent bundle uretiminin resmi protokolu haline gelir.</p>
+<p>Bu cerceve hem akademik olarak birlikte calisabilir agent sistemleri, kontrat tabanli kod uretimi ve no-code agent engineering alanlarina katkida bulunabilir; hem de ticari olarak Agent Studio benzeri platformlari daha acik, moduler ve olceklenebilir hale getirebilir.</p>
+<p>Gelecek calismalarin odagi, paket import preview, otomatik validasyon, plugin registry ve runtime sandbox katmanlarini tamamlarken; skill tabanli kontratin gercekten entegrasyon basarisini ne kadar artirdigini deneysel olarak gostermek olmalidir.</p>
+<h2>12. Olası Genisletmeler</h2>
+<p>Bu taslak asagidaki yonlerde genisletilebilir:</p>
+<ul>
+<li>IEEE veya ACM formatina donusturme</li>
+<li>Ingilizce versiyon olusturma</li>
+<li>literatur taramasi ve ilgili calismalar bolumu ekleme</li>
+<li>deney protokolu ve benchmark veri seti ekleme</li>
+<li>Agent Studio import mekanizmasi tamamlandiktan sonra gercek sonuclarla guncelleme</li>
+</ul>
+    <div class="footer">Ipuclari: Tarayicida acip <strong>Print → Save as PDF</strong> ile kolayca PDF'e de cevirebilirsin.</div>
+  </main>
+</body>
+</html>

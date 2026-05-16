@@ -1,4 +1,4 @@
-"""Config-driven agent and custom tool helpers for Agent Studio."""
+"""Config-driven agent, custom tool and agent pack helpers for Agent Studio."""
 
 from __future__ import annotations
 
@@ -7,7 +7,10 @@ import importlib.util
 import inspect
 import os
 import re
+import ast
+import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,17 +24,21 @@ APP_DIR = Path(__file__).resolve().parents[1]
 CONFIG_DIR = APP_DIR / "config"
 WORKSPACE_DIR = APP_DIR / "workspace"
 CUSTOM_TOOLS_DIR = WORKSPACE_DIR / "custom_tools"
+AGENT_PACKS_DIR = WORKSPACE_DIR / "agent_packs"
 SUBMODELS_DIR = APP_DIR / "llms" / "SubModels"
 SUBMODELS_INIT_PATH = SUBMODELS_DIR / "__init__.py"
 AGENTS_CONFIG_PATH = CONFIG_DIR / "agents.yaml"
 CUSTOM_TOOLS_CONFIG_PATH = CONFIG_DIR / "custom_tools.yaml"
+AGENT_PACKS_CONFIG_PATH = CONFIG_DIR / "agent_packs.yaml"
 MODEL_ENV_PATH = APP_DIR.parent / ".env.model"
 
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,80}$")
+PACK_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 VALID_AGENT_TYPES = {"builtin", "config"}
 VALID_TOOL_MODES = {"default", "custom"}
+VALID_PACK_TYPES = {"tool_pack", "agent_bundle", "runtime_pack"}
 RECOMMENDED_MEMORY_TOOLS = ["context_paketi_oku", "context_aksiyon_kaydet"]
 AGENT_STUDIO_BUILTIN_MARKER = "# Agent Studio generated builtin submodel"
 
@@ -170,13 +177,20 @@ def _default_custom_tools_config() -> dict[str, Any]:
     return {"version": 1, "custom_tools": []}
 
 
+def _default_agent_packs_config() -> dict[str, Any]:
+    return {"version": 1, "installed_packs": []}
+
+
 def ensure_agent_studio_files() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CUSTOM_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    AGENT_PACKS_DIR.mkdir(parents=True, exist_ok=True)
     if not AGENTS_CONFIG_PATH.exists():
         _write_yaml(AGENTS_CONFIG_PATH, _default_agents_config())
     if not CUSTOM_TOOLS_CONFIG_PATH.exists():
         _write_yaml(CUSTOM_TOOLS_CONFIG_PATH, _default_custom_tools_config())
+    if not AGENT_PACKS_CONFIG_PATH.exists():
+        _write_yaml(AGENT_PACKS_CONFIG_PATH, _default_agent_packs_config())
 
 
 def validate_agent_name(name: str) -> str:
@@ -197,6 +211,13 @@ def validate_env_name(name: str) -> str:
     normalized = (name or "").strip().upper()
     if not ENV_NAME_RE.fullmatch(normalized):
         raise AgentStudioError("Env adi buyuk harf, rakam ve '_' icermeli; harfle baslamali.")
+    return normalized
+
+
+def validate_pack_name(name: str) -> str:
+    normalized = (name or "").strip()
+    if not PACK_NAME_RE.fullmatch(normalized):
+        raise AgentStudioError("Pack adi sadece kucuk harf, rakam ve '_' icerebilir; harfle baslamali.")
     return normalized
 
 
@@ -721,6 +742,456 @@ def load_custom_tools(*, include_disabled: bool = False) -> dict[str, Any]:
     return {"tools": tools, "entries": entries, "errors": errors}
 
 
+def load_agent_packs_config() -> dict[str, Any]:
+    ensure_agent_studio_files()
+    errors: list[dict[str, Any]] = []
+    try:
+        data = _read_yaml(AGENT_PACKS_CONFIG_PATH, _default_agent_packs_config())
+    except AgentStudioError as exc:
+        data = _default_agent_packs_config()
+        errors.append({"scope": "agent_packs", "message": str(exc)})
+
+    raw_packs = data.get("installed_packs")
+    if not isinstance(raw_packs, list):
+        raw_packs = []
+        errors.append({"scope": "agent_packs", "message": "installed_packs listesi bulunamadi."})
+
+    normalized = []
+    seen = set()
+    for raw in raw_packs:
+        if not isinstance(raw, dict):
+            errors.append({"scope": "agent_packs", "message": "Pack entry dict olmali.", "entry": raw})
+            continue
+        try:
+            name = validate_pack_name(str(raw.get("name") or ""))
+        except AgentStudioError as exc:
+            errors.append({"scope": "agent_packs", "message": str(exc), "entry": raw})
+            continue
+        if name in seen:
+            errors.append({"scope": "agent_packs", "message": f"Tekrarlanan pack atlandi: {name}"})
+            continue
+        pack_type = str(raw.get("type") or "agent_bundle").strip().lower()
+        if pack_type not in VALID_PACK_TYPES:
+            pack_type = "agent_bundle"
+        normalized.append(
+            {
+                "name": name,
+                "version": str(raw.get("version") or "0.1.0").strip() or "0.1.0",
+                "type": pack_type,
+                "description": str(raw.get("description") or "").strip(),
+                "source_path": str(raw.get("source_path") or "").strip(),
+                "installed_path": str(raw.get("installed_path") or "").strip(),
+                "installed_agents": _normalize_string_list(raw.get("installed_agents")),
+                "installed_tools": _normalize_string_list(raw.get("installed_tools")),
+                "installed_at": str(raw.get("installed_at") or "").strip(),
+            }
+        )
+        seen.add(name)
+
+    return {
+        "version": int(data.get("version") or 1),
+        "installed_packs": normalized,
+        "errors": errors,
+        "path": str(AGENT_PACKS_CONFIG_PATH),
+    }
+
+
+def save_agent_packs_config(entries: list[dict[str, Any]]) -> None:
+    normalized = []
+    for entry in entries:
+        name = validate_pack_name(str(entry.get("name") or ""))
+        pack_type = str(entry.get("type") or "agent_bundle").strip().lower()
+        if pack_type not in VALID_PACK_TYPES:
+            raise AgentStudioError("Pack type 'tool_pack', 'agent_bundle' veya 'runtime_pack' olmali.")
+        normalized.append(
+            {
+                "name": name,
+                "version": str(entry.get("version") or "0.1.0").strip() or "0.1.0",
+                "type": pack_type,
+                "description": str(entry.get("description") or "").strip(),
+                "source_path": str(entry.get("source_path") or "").strip(),
+                "installed_path": str(entry.get("installed_path") or "").strip(),
+                "installed_agents": _normalize_string_list(entry.get("installed_agents")),
+                "installed_tools": _normalize_string_list(entry.get("installed_tools")),
+                "installed_at": str(entry.get("installed_at") or "").strip(),
+            }
+        )
+    _write_yaml(AGENT_PACKS_CONFIG_PATH, {"version": 1, "installed_packs": normalized})
+
+
+def _resolve_pack_root(path_value: str) -> Path:
+    candidate = Path(str(path_value or "").strip()).expanduser()
+    if not candidate.is_absolute():
+        candidate = (APP_DIR.parent / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    if not candidate.exists():
+        raise AgentStudioError("Pack yolu bulunamadi.")
+    if not candidate.is_dir():
+        raise AgentStudioError("Pack yolu klasor olmali.")
+    return candidate
+
+
+def _pack_manifest_path(root: Path) -> Path:
+    return root / "plugin.yaml"
+
+
+def _read_pack_manifest(root: Path) -> dict[str, Any]:
+    manifest_path = _pack_manifest_path(root)
+    if not manifest_path.exists():
+        raise AgentStudioError("plugin.yaml bulunamadi.")
+    data = _read_yaml(manifest_path, {})
+    if not isinstance(data, dict):
+        raise AgentStudioError("plugin.yaml kok verisi dict olmali.")
+    return data
+
+
+def _normalize_pack_type(value: Any) -> str:
+    pack_type = str(value or "agent_bundle").strip().lower()
+    if pack_type not in VALID_PACK_TYPES:
+        raise AgentStudioError("Pack type 'tool_pack', 'agent_bundle' veya 'runtime_pack' olmali.")
+    return pack_type
+
+
+def _resolve_relative_path(root: Path, relative_value: str, label: str) -> Path:
+    relative_text = str(relative_value or "").strip()
+    if not relative_text:
+        raise AgentStudioError(f"{label} bos olamaz.")
+    candidate = (root / relative_text).resolve()
+    if os.path.commonpath([str(root.resolve()), str(candidate)]) != str(root.resolve()):
+        raise AgentStudioError(f"{label} pack dizini disina cikamaz.")
+    if not candidate.exists():
+        raise AgentStudioError(f"{label} bulunamadi: {relative_text}")
+    return candidate
+
+
+def _inspect_tool_source(path: Path) -> dict[str, Any]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return {"source": "", "functions": [], "module_doc": "", "error": str(exc)}
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except Exception as exc:
+        return {"source": source, "functions": [], "module_doc": "", "error": f"Python parse hatasi: {exc}"}
+    functions = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(
+                {
+                    "name": node.name,
+                    "doc": ast.get_docstring(node) or "",
+                    "lineno": getattr(node, "lineno", 0),
+                }
+            )
+    return {
+        "source": source,
+        "functions": functions,
+        "module_doc": ast.get_docstring(tree) or "",
+        "error": "",
+    }
+
+
+def _iter_pack_tools(root: Path, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    declared = manifest.get("tools")
+    if isinstance(declared, list) and declared:
+        items = []
+        for raw in declared:
+            if not isinstance(raw, dict):
+                raise AgentStudioError("plugin.yaml tools listesi sadece dict entry icermeli.")
+            file_value = str(raw.get("file") or "").strip()
+            if not file_value:
+                raise AgentStudioError("Tool entry 'file' alani icermeli.")
+            inferred_name = Path(file_value).stem
+            name = validate_tool_name(str(raw.get("name") or inferred_name))
+            items.append(
+                {
+                    "name": name,
+                    "file": file_value,
+                    "description": str(raw.get("description") or "").strip(),
+                    "params_note": str(raw.get("params_note") or "").strip(),
+                    "env_vars": _normalize_env_var_names(raw.get("env_vars")),
+                }
+            )
+        return items
+
+    tools_dir = root / "tools"
+    if not tools_dir.exists():
+        return []
+    items = []
+    for path in sorted(tools_dir.glob("*.py")):
+        name = validate_tool_name(path.stem)
+        items.append(
+            {
+                "name": name,
+                "file": str(path.relative_to(root)),
+                "description": "",
+                "params_note": "",
+                "env_vars": [],
+            }
+        )
+    return items
+
+
+def _load_agent_entries_from_file(path: Path) -> list[dict[str, Any]]:
+    data = _read_yaml(path, {})
+    if isinstance(data, dict) and isinstance(data.get("agents"), list):
+        entries = data.get("agents") or []
+    elif isinstance(data, dict):
+        entries = [data]
+    else:
+        raise AgentStudioError(f"{path.name} agent manifesti dict veya agents listesi olmali.")
+    if not all(isinstance(item, dict) for item in entries):
+        raise AgentStudioError(f"{path.name} agent manifesti sadece dict entry icermeli.")
+    return [dict(item) for item in entries]
+
+
+def _iter_pack_agent_sources(root: Path, manifest: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    declared = manifest.get("agents")
+    files: list[Path] = []
+    if isinstance(declared, list) and declared:
+        for raw in declared:
+            if isinstance(raw, str):
+                files.append(_resolve_relative_path(root, raw, "Agent manifesti"))
+            elif isinstance(raw, dict):
+                file_value = str(raw.get("file") or "").strip()
+                if not file_value:
+                    raise AgentStudioError("plugin.yaml agent entry 'file' alani icermeli.")
+                files.append(_resolve_relative_path(root, file_value, "Agent manifesti"))
+            else:
+                raise AgentStudioError("plugin.yaml agents listesi string veya dict entry icermeli.")
+    else:
+        agents_dir = root / "agents"
+        if agents_dir.exists():
+            files = sorted(agents_dir.glob("*.yml")) + sorted(agents_dir.glob("*.yaml"))
+
+    result: list[tuple[dict[str, Any], str]] = []
+    for file_path in files:
+        for entry in _load_agent_entries_from_file(file_path):
+            result.append((entry, str(file_path.relative_to(root))))
+    return result
+
+
+def _materialize_pack_agent(root: Path, entry: dict[str, Any], source_file: str) -> dict[str, Any]:
+    raw = dict(entry)
+    prompt_file = str(raw.pop("system_prompt_file", "") or "").strip()
+    if prompt_file:
+        prompt_path = _resolve_relative_path(root, prompt_file, "System prompt dosyasi")
+        raw["system_prompt"] = prompt_path.read_text(encoding="utf-8")
+    elif not raw.get("system_prompt"):
+        default_prompt = root / "prompts" / f"{Path(source_file).stem}.md"
+        if default_prompt.exists():
+            raw["system_prompt"] = default_prompt.read_text(encoding="utf-8")
+    normalized = normalize_agent_entry(raw)
+    return {
+        **normalized,
+        "source_file": source_file,
+        "prompt_source": prompt_file or "",
+    }
+
+
+def preview_agent_pack(path_value: str) -> dict[str, Any]:
+    ensure_agent_studio_files()
+    root = _resolve_pack_root(path_value)
+    manifest = _read_pack_manifest(root)
+    pack_name = validate_pack_name(str(manifest.get("name") or root.name))
+    pack_type = _normalize_pack_type(manifest.get("type"))
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    tools_preview = []
+    for item in _iter_pack_tools(root, manifest):
+        try:
+            tool_path = _resolve_relative_path(root, item["file"], "Tool dosyasi")
+            if tool_path.suffix != ".py":
+                raise AgentStudioError("Tool dosyasi .py olmali.")
+            inspection = _inspect_tool_source(tool_path)
+            function_names = [func["name"] for func in inspection["functions"]]
+            export_ok = item["name"] in function_names
+            error = inspection["error"]
+            if not export_ok and not error:
+                error = f"{item['name']} fonksiyonu export edilmemis."
+            description = item["description"] or next(
+                (func["doc"].strip().splitlines()[0] for func in inspection["functions"] if func["name"] == item["name"] and func["doc"].strip()),
+                inspection["module_doc"].strip().splitlines()[0] if inspection["module_doc"].strip() else "",
+            )
+            tools_preview.append(
+                {
+                    **item,
+                    "path": str(tool_path),
+                    "export_ok": export_ok,
+                    "function_names": function_names,
+                    "description": description,
+                    "error": error,
+                }
+            )
+            if error:
+                errors.append(f"Tool {item['name']}: {error}")
+        except Exception as exc:
+            tools_preview.append({**item, "path": "", "export_ok": False, "function_names": [], "error": str(exc)})
+            errors.append(f"Tool {item['name']}: {exc}")
+
+    agents_preview = []
+    try:
+        for raw_entry, source_file in _iter_pack_agent_sources(root, manifest):
+            normalized = _materialize_pack_agent(root, raw_entry, source_file)
+            agents_preview.append(normalized)
+            if normalized["type"] == "builtin" and pack_type != "runtime_pack":
+                warnings.append(
+                    f"{normalized['name']} builtin tipinde. Harici Python submodel kurulumu icin runtime_pack daha uygun."
+                )
+    except Exception as exc:
+        errors.append(str(exc))
+
+    if pack_type == "runtime_pack":
+        warnings.append("runtime_pack preview desteklenir; MVP kurulum akisi su an sadece tool_pack ve agent_bundle icin aktiftir.")
+    if not tools_preview and pack_type in {"tool_pack", "agent_bundle"}:
+        warnings.append("Pack icinde kurulum icin tool bulunamadi.")
+    if pack_type == "agent_bundle" and not agents_preview:
+        warnings.append("agent_bundle tipinde ama agents/ manifesti bulunamadi.")
+
+    readme_path = root / "README.md"
+    env_example_path = root / "env.example"
+    installable = not errors and pack_type in {"tool_pack", "agent_bundle"}
+
+    return {
+        "name": pack_name,
+        "version": str(manifest.get("version") or "0.1.0").strip() or "0.1.0",
+        "type": pack_type,
+        "description": str(manifest.get("description") or "").strip(),
+        "path": str(root),
+        "manifest_path": str(_pack_manifest_path(root)),
+        "readme_path": str(readme_path) if readme_path.exists() else "",
+        "env_example_path": str(env_example_path) if env_example_path.exists() else "",
+        "agents": agents_preview,
+        "tools": tools_preview,
+        "warnings": warnings,
+        "errors": errors,
+        "installable": installable,
+    }
+
+
+def install_agent_pack(path_value: str, *, overwrite: bool = False) -> dict[str, Any]:
+    preview = preview_agent_pack(path_value)
+    if preview["errors"]:
+        raise AgentStudioError("Pack preview hata verdi; kurulum yapilmadi.")
+    if preview["type"] not in {"tool_pack", "agent_bundle"}:
+        raise AgentStudioError("MVP kurulum akisi su an sadece tool_pack ve agent_bundle destekliyor.")
+
+    tool_registry = build_tool_registry()
+    builtin_tool_names = {
+        item["name"]
+        for item in tool_registry["tools"]
+        if item.get("source") != "custom"
+    }
+    custom_config = load_custom_tools_config()
+    existing_custom_entries = {entry["name"]: dict(entry) for entry in custom_config["custom_tools"]}
+    updated_custom_entries = list(custom_config["custom_tools"])
+    tool_write_plan: list[tuple[dict[str, Any], Path]] = []
+
+    for tool in preview["tools"]:
+        name = tool["name"]
+        if tool.get("error"):
+            raise AgentStudioError(f"{name} tool hatali; once duzelt.")
+        if name in builtin_tool_names:
+            raise AgentStudioError(f"{name} hazir builtin tool ile cakisiyor.")
+        source_path = Path(tool["path"])
+        target_path = _custom_tool_path(source_path.name)
+        existing_entry = existing_custom_entries.get(name)
+        if target_path.exists() and not overwrite and not existing_entry:
+            raise AgentStudioError(f"{target_path.name} zaten var; overwrite acilmadan kurulamaz.")
+        if existing_entry and not overwrite:
+            raise AgentStudioError(f"{name} isimli custom tool zaten kayitli; overwrite ile tekrar kur.")
+        tool_write_plan.append((tool, target_path))
+
+    agent_config = load_agents_config()
+    existing_agents = {item["name"]: dict(item) for item in agent_config["agents"]}
+    updated_agents = list(agent_config["agents"])
+    installed_agent_names = []
+    for agent in preview["agents"]:
+        if agent["type"] == "builtin":
+            raise AgentStudioError("Harici builtin/runtime agent kurulumu bu MVP'de acik degil. Agent'i config tipinde paketle.")
+        existing = existing_agents.get(agent["name"])
+        if existing and not overwrite:
+            raise AgentStudioError(f"{agent['name']} zaten agents.yaml icinde var; overwrite ile tekrar kur.")
+
+    installed_root = AGENT_PACKS_DIR / preview["name"]
+    if installed_root.exists() and not overwrite:
+        raise AgentStudioError(f"{installed_root.name} pack klasoru zaten var; overwrite ile guncelle.")
+
+    for tool, target_path in tool_write_plan:
+        name = tool["name"]
+        source_path = Path(tool["path"])
+        existing_entry = existing_custom_entries.get(name)
+        shutil.copy2(source_path, target_path)
+        entry = {
+            "name": name,
+            "enabled": True,
+            "description": str(tool.get("description") or "").strip(),
+            "file": target_path.name,
+            "params_note": str(tool.get("params_note") or "").strip(),
+            "env_vars": _normalize_env_var_names(tool.get("env_vars")),
+        }
+        if existing_entry:
+            updated_custom_entries = [item for item in updated_custom_entries if item["name"] != name]
+        updated_custom_entries.append(entry)
+        existing_custom_entries[name] = entry
+
+    save_custom_tools_config(updated_custom_entries)
+    for agent in preview["agents"]:
+        existing = existing_agents.get(agent["name"])
+        if existing:
+            updated_agents = [item for item in updated_agents if item["name"] != agent["name"]]
+        updated_agents.append(
+            {
+                "name": agent["name"],
+                "type": agent["type"],
+                "enabled": bool(agent.get("enabled", True)),
+                "description": agent.get("description") or "",
+                "model": agent.get("model") or "default",
+                "tool_mode": agent.get("tool_mode") or "custom",
+                "system_prompt": agent.get("system_prompt") or "",
+                "tools": _normalize_string_list(agent.get("tools")),
+            }
+        )
+        existing_agents[agent["name"]] = agent
+        installed_agent_names.append(agent["name"])
+
+    save_agents_config(updated_agents, agent_config["global_disabled_tools"])
+    if installed_root.exists():
+        shutil.rmtree(installed_root)
+    shutil.copytree(preview["path"], installed_root)
+
+    packs_config = load_agent_packs_config()
+    entries = [item for item in packs_config["installed_packs"] if item["name"] != preview["name"]]
+    entries.append(
+        {
+            "name": preview["name"],
+            "version": preview["version"],
+            "type": preview["type"],
+            "description": preview["description"],
+            "source_path": preview["path"],
+            "installed_path": str(installed_root),
+            "installed_agents": installed_agent_names,
+            "installed_tools": [item["name"] for item in preview["tools"]],
+            "installed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    save_agent_packs_config(entries)
+
+    return {
+        "pack": {
+            "name": preview["name"],
+            "version": preview["version"],
+            "type": preview["type"],
+            "installed_path": str(installed_root),
+            "installed_agents": installed_agent_names,
+            "installed_tools": [item["name"] for item in preview["tools"]],
+        },
+        "catalog": load_agent_studio_catalog(),
+    }
+
+
 def _tool_description(func: Callable) -> str:
     doc = (getattr(func, "__doc__", "") or "").strip().splitlines()
     return doc[0].strip() if doc else ""
@@ -859,6 +1330,7 @@ def build_tool_registry() -> dict[str, Any]:
 def load_agent_studio_catalog() -> dict[str, Any]:
     agents = load_agents_config()
     custom = load_custom_tools(include_disabled=True)
+    packs = load_agent_packs_config()
     registry = build_tool_registry()
     agent_entries = [
         {**agent, "system_prompt_placeholder": default_system_prompt_placeholder(agent)}
@@ -869,15 +1341,18 @@ def load_agent_studio_catalog() -> dict[str, Any]:
         "global_disabled_tools": agents["global_disabled_tools"],
         "tools": registry["tools"],
         "custom_tools": custom["entries"],
+        "packs": packs["installed_packs"],
         "recommended_memory_tools": list(RECOMMENDED_MEMORY_TOOLS),
         "default_config_system_prompt_placeholder": default_system_prompt_placeholder({"type": "config"}),
         "paths": {
             "agents_config": str(AGENTS_CONFIG_PATH),
             "custom_tools_config": str(CUSTOM_TOOLS_CONFIG_PATH),
+            "agent_packs_config": str(AGENT_PACKS_CONFIG_PATH),
             "custom_tools_dir": str(CUSTOM_TOOLS_DIR),
+            "agent_packs_dir": str(AGENT_PACKS_DIR),
             "submodels_dir": str(SUBMODELS_DIR),
             "submodels_init": str(SUBMODELS_INIT_PATH),
             "model_env": str(MODEL_ENV_PATH),
         },
-        "errors": agents["errors"] + registry["errors"] + custom["errors"],
+        "errors": agents["errors"] + registry["errors"] + custom["errors"] + packs["errors"],
     }

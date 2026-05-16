@@ -11,10 +11,13 @@ from openai import AsyncOpenAI
 from .base import SubModel, SubModelRateLimitError
 from MarketingApp.llms.runtime_config import (
     get_base_model_name,
-    get_base_reasoning_effort,
+    get_browser_model_name,
     get_model_api_key,
+    get_model_api_keys,
     get_openai_compat_base_url,
     get_provider_display_name,
+    get_submodel_model_name,
+    get_submodel_reasoning_effort,
 )
 
 
@@ -42,8 +45,9 @@ class GenericConfigAgent(SubModel):
     def __init__(self, config: dict[str, Any], tools: list):
         self.config = dict(config)
         self.provider_name = get_provider_display_name()
-        self.reasoning_effort = get_base_reasoning_effort()
-        api_key = get_model_api_key()
+        self.reasoning_effort = get_submodel_reasoning_effort()
+        api_keys = get_model_api_keys()
+        api_key = api_keys[0] if api_keys else get_model_api_key()
         model_id = self._resolve_model_id(self.config.get("model"))
         description = self.config.get("description") or "Config tabanli ozel alt ajan."
         super(GenericConfigAgent, self).__init__(
@@ -53,15 +57,16 @@ class GenericConfigAgent(SubModel):
             api_key=api_key,
             tools=tools,
         )
-        self._client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=get_openai_compat_base_url(),
-        )
+        self._configure_openai_client(get_openai_compat_base_url(), api_keys)
 
     def _resolve_model_id(self, configured: str | None) -> str:
         model = (configured or "default").strip()
-        if model in {"", "default", "base_default"}:
+        if model in {"", "default"}:
+            return get_submodel_model_name()
+        if model == "base_default":
             return get_base_model_name()
+        if model == "browser_default":
+            return get_browser_model_name()
         return model
 
     def _strip_thought_blocks(self, text: str) -> str:
@@ -146,7 +151,7 @@ class GenericConfigAgent(SubModel):
                 if self.reasoning_effort:
                     create_kwargs["reasoning_effort"] = self.reasoning_effort
 
-                completion = await self._client.chat.completions.create(**create_kwargs)
+                completion = await self._create_chat_completion_with_failover(create_kwargs)
                 message = completion.choices[0].message
                 current_text = self._extract_message_text(message)
                 tool_calls = getattr(message, "tool_calls", None) or []
