@@ -1,15 +1,14 @@
 # MarketingApp
 
-AI destekli sosyal medya, icerik uretimi, browser otomasyonu ve Agent Studio paneli.
+AI-powered social media management, content creation, browser automation, and Agent Studio control panel.
 
-## Hemen Calistir
+[🇹🇷 Türkçe](#türkçe) | [🇬🇧 English](#english)
 
-```bash
-git pull
-./run.sh
-```
+---
 
-Yeni bilgisayarda ilk kez calistiriyorsan:
+## 🇬🇧 English
+
+### Quick Start
 
 ```bash
 git clone https://github.com/Ahmet2001/BrowserAgent.git
@@ -18,35 +17,111 @@ chmod +x run.sh
 ./run.sh
 ```
 
-Panel acildiktan sonra:
+After the panel starts:
 
 ```text
 http://127.0.0.1:8001/panel
 ```
 
-## run.sh Ne Yapar?
+### What run.sh Does
 
-- `.venv` yoksa olusturur.
-- `requirements.txt` icindeki paketleri kurar/gunceller.
-- `python -m MarketingApp.main` ile botu ve panel API'sini baslatir.
+- Creates `.venv` if it doesn't exist
+- Installs/updates packages from `requirements.txt`
+- Launches the bot and panel API via `python -m MarketingApp.main`
 
-## Ortam Dosyalari
+### Environment Files
 
-Bu repo private kabul edildigi icin calisma ayarlari repoda tutulur:
+Copy `.env.example` to `.env` and fill in your keys:
 
-- `.env`: ana model/provider ve Telegram ayarlari
-- `.env.local`: yerel override ayarlari
-- `.env.secrets`: Pexels gibi ek API anahtarlari
+- `.env`: main model/provider and Telegram settings
+- `.env.local` (optional): local override settings
+- `.env.secrets` (optional): additional API keys (Pexels, etc.)
 
-`.env.secrets` bilincli olarak git tarafindan takip edilir. Repo public olursa bu dosyayi tekrar ignore etmek gerekir.
+### Features
 
-## Notlar
+- **Content Creator Agent** – Text, image, and video content generation
+- **Social Media Agent** – X (Twitter) automation, posting, replies
+- **Browser Agent** – Playwright/Selenium-based browser automation
+- **Research Agent** – Topic research and data gathering
+- **System Agent** – System monitoring and computer control (PyAutoGUI)
+- **Agent Studio** – Web panel for managing and building custom agents
+- **Agent Packs** – Plug-and-play agent bundles
 
-- X otomasyonu icin Chrome kurulu ve X oturumu acil bir profil gerekir.
-- X'te gorselli post yayinlamak icin panelde `content_creator_agent` ve `sosyal_medya_agent` aktif olmali.
-- PNG/video uretiminde Playwright tarayicisi eksikse bir kere sunu calistir:
+### Requirements
+
+- Python 3.11+
+- Chrome browser (for X automation)
+- An active X (Twitter) session in a Chrome profile
+
+For PNG/video rendering, install Playwright browser:
 
 ```bash
 source .venv/bin/activate
 playwright install chromium
 ```
+
+### License
+
+MIT © 2026 Ahmet Rıfat Öztürk
+
+---
+
+## 🇹🇷 Türkçe
+
+AI destekli sosyal medya, içerik üretimi, browser otomasyonu ve Agent Studio paneli.
+
+### Hemen Çalıştır
+
+```bash
+git clone https://github.com/Ahmet2001/BrowserAgent.git
+cd BrowserAgent
+chmod +x run.sh
+./run.sh
+```
+
+Panel açıldıktan sonra:
+
+```text
+http://127.0.0.1:8001/panel
+```
+
+### run.sh Ne Yapar?
+
+- `.venv` yoksa oluşturur
+- `requirements.txt` içindeki paketleri kurar/günceller
+- `python -m MarketingApp.main` ile botu ve panel API'sini başlatır
+
+### Ortam Dosyaları
+
+`.env.example` dosyasını `.env` olarak kopyalayıp kendi anahtarlarınızı girin:
+
+- `.env`: ana model/provider ve Telegram ayarları
+- `.env.local` (opsiyonel): yerel override ayarları
+- `.env.secrets` (opsiyonel): Pexels gibi ek API anahtarları
+
+### Özellikler
+
+- **Content Creator Agent** – Metin, görsel ve video içerik üretimi
+- **Sosyal Medya Agent** – X (Twitter) otomasyonu, post, yanıt
+- **Browser Agent** – Playwright/Selenium tabanlı tarayıcı otomasyonu
+- **Araştırma Agent** – Konu araştırması ve veri toplama
+- **Sistem Agent** – Sistem izleme ve bilgisayar kontrolü (PyAutoGUI)
+- **Agent Studio** – Web panel ile agent yönetimi ve özel agent oluşturma
+- **Agent Paketleri** – Tak-çalıştır agent bundle desteği
+
+### Gereksinimler
+
+- Python 3.11+
+- Chrome tarayıcı (X otomasyonu için)
+- Chrome profilinde aktif X (Twitter) oturumu
+
+PNG/video üretimi için Playwright tarayıcısını kurun:
+
+```bash
+source .venv/bin/activate
+playwright install chromium
+```
+
+### Lisans
+
+MIT © 2026 Ahmet Rıfat Öztürk
