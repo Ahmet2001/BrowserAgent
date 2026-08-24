@@ -622,7 +622,7 @@ class BaseModel:
         if not self._is_runtime_callable_active(name):
             kind = "Alt ajan" if is_submodel else "Tool"
             self.log_message("sistem", f"{kind} pasif oldugu icin cagri engellendi: {name}")
-            return f"[Hata]: {kind} pasif: {name}. Panelden aktiflestirilmeden calistirilamaz."
+            return f"[Hata]: {kind} pasif: {name}. Terminalden aktiflestirilmeden calistirilamaz."
 
         emoji = "🤖" if is_submodel else "🔧"
         label = "submodel" if is_submodel else "tool"

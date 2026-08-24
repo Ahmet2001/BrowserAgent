@@ -10,7 +10,6 @@ discord.py==2.6.4
 ddgs==9.11.3
 distro==1.9.0
 duckduckgo_search==8.1.1
-fastapi==0.121.0
 google-api-core==2.30.0
 google-api-python-client==2.192.0
 google-auth==2.49.0
@@ -44,7 +43,6 @@ pydantic_core==2.41.5
 pydub==0.25.1
 pyee==13.0.1
 pyparsing==3.3.2
-python-multipart==0.0.20
 python-dotenv==1.2.2
 python-telegram-bot==22.6
 PyYAML==6.0.3
@@ -60,7 +58,6 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 uritemplate==4.2.0
 urllib3==2.6.3
-uvicorn==0.38.0
 webdriver-manager==4.0.2
 websockets==16.0
 yt-dlp==2026.3.3

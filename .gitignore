@@ -7,6 +7,7 @@
 __pycache__/
 *.py[cod]
 *.log
+*.egg-info/
 
 MarketingApp/workspace/chrome_profile/
 MarketingApp/workspace/browser_debug_profile/

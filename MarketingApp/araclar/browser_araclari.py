@@ -61,7 +61,7 @@ def _get_driver():
 
 
 def get_browser_runtime_state() -> dict:
-    """Panel ve workflow katmanı için tarayıcı görünürlük durumunu döndürür."""
+    """Terminal ve workflow katmani icin tarayici gorunurluk durumunu dondurur."""
     active_headless = bool(_driver_headless) if _driver is not None and _driver_headless is not None else None
     preferred_headless = bool(_preferred_headless)
     effective_headless = active_headless if active_headless is not None else preferred_headless

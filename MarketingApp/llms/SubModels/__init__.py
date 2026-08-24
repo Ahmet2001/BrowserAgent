@@ -12,3 +12,6 @@ from . import browser_agent
 from . import content_creator_agent
 from . import sosyal_medya_agent
 from . import computer  # Agent Studio builtin
+from . import arastirma_agent
+from . import sistem_agent
+from . import vlm_agent

@@ -28,7 +28,7 @@ except ImportError:
     DISCORD_AVAILABLE = False
     print("⚠️ [Discord] discord.py yüklü değil. 'pip install discord.py' ile yükleyin.")
 
-from MarketingApp.enviroments.kanal_router import KanalMesaji, mesaj_isle, kanal_kaydet
+from MarketingApp.environments.kanal_router import KanalMesaji, mesaj_isle, kanal_kaydet
 
 
 # ─── Bot Değişkenleri ────────────────────────────────────────────────────────

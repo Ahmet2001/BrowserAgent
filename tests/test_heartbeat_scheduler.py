@@ -6,8 +6,8 @@ from datetime import datetime
 from unittest import mock
 
 from MarketingApp.araclar import social_browser_workflow
-from MarketingApp.enviroments import automation_runtime
-from MarketingApp.enviroments import heartbeat
+from MarketingApp.environments import automation_runtime
+from MarketingApp.environments import heartbeat
 
 
 class DummyBaseModel:

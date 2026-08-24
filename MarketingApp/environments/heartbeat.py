@@ -2,7 +2,7 @@
 Heartbeat scheduler service.
 
 APScheduler tabanli zamanlayici, YAML config'ten gorevleri yukler
-ve panel tarafina runtime durumunu sunar.
+ve terminal tarafina runtime durumunu sunar.
 """
 
 from __future__ import annotations
@@ -1202,4 +1202,4 @@ if __name__ == "__main__":
     if "--test-tick" in sys.argv:
         asyncio.run(test_tick())
     else:
-        print("Kullanim: python -m MarketingApp.enviroments.heartbeat --test-tick")
+        print("Kullanim: python -m MarketingApp.environments.heartbeat --test-tick")

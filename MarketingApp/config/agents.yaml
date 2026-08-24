@@ -90,3 +90,29 @@ agents:
   - context_paketi_oku
   - context_aksiyon_kaydet
   - sistem_durum_monitor
+- name: arastirma_agent
+  type: builtin
+  enabled: false
+  description: Derinlemesine web arastirmasi ve kapsamli rapor yazma uzmani (Gemini
+    Live API).
+  model: default
+  tool_mode: default
+  system_prompt: ''
+  tools: []
+- name: sistem_agent
+  type: builtin
+  enabled: false
+  description: Dosya yonetimi, sistem analizi ve kendini gelistirme uzmani (Gemini
+    Live API).
+  model: default
+  tool_mode: default
+  system_prompt: ''
+  tools: []
+- name: vlm_agent
+  type: builtin
+  enabled: false
+  description: Ekran, klavye ve fare kontrol uzmani (Gemini Live API).
+  model: default
+  tool_mode: default
+  system_prompt: ''
+  tools: []

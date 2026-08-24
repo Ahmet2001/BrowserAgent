@@ -1,6 +1,6 @@
 # MarketingApp
 
-AI-powered social media management, content creation, browser automation, and Agent Studio control panel.
+AI-powered social media management, content creation, browser automation, and an interactive terminal control interface.
 
 [🇹🇷 Türkçe](#türkçe) | [🇬🇧 English](#english)
 
@@ -17,17 +17,29 @@ chmod +x run.sh
 ./run.sh
 ```
 
-After the panel starts:
+`run.sh` starts an interactive terminal session. Type a message and press enter to chat with the agent, or use one of the built-in commands:
 
 ```text
-http://127.0.0.1:8001/panel
+/status                         Show system and channel status
+/agents                         List agents
+/agent <name> on|off|toggle     Toggle an agent
+/tools [query]                  List or filter tools
+/tool <name> on|off|toggle      Toggle a tool
+/logs [count]                   Show recent logs (default 15)
+/heartbeat                      Show scheduler and job status
+/heartbeat run|pause|resume <id>
+/heartbeat reload               Reload the heartbeat config from disk
+/reload                         Reload agent/custom tool config
+/history                        Show terminal chat history
+/clear                          Clear terminal chat history
+/exit                           Shut down safely
 ```
 
 ### What run.sh Does
 
 - Creates `.venv` if it doesn't exist
 - Installs/updates packages from `requirements.txt`
-- Launches the bot and panel API via `python -m MarketingApp.main`
+- Launches the bot and the interactive terminal via `python -m MarketingApp.main`
 
 ### Environment Files
 
@@ -44,7 +56,7 @@ Copy `.env.example` to `.env` and fill in your keys:
 - **Browser Agent** – Playwright/Selenium-based browser automation
 - **Research Agent** – Topic research and data gathering
 - **System Agent** – System monitoring and computer control (PyAutoGUI)
-- **Agent Studio** – Web panel for managing and building custom agents
+- **Agent Studio** – Terminal-managed configuration for building and toggling custom agents
 - **Agent Packs** – Plug-and-play agent bundles
 
 ### Requirements

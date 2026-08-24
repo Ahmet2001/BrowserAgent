@@ -21,11 +21,25 @@ def _ensure_workspace():
 
 
 def _resolve_workspace_path(dosya_adi: str) -> tuple[str | None, str]:
-    """Workspace içindeki güvenli relatif yolu ve tam yolu döndürür."""
-    safe_path = os.path.normpath(dosya_adi).lstrip("/")
-    if ".." in safe_path:
-        return None, "❌ Hata: '..' kullanılarak üst dizine çıkılamaz."
-    filepath = os.path.join(WORKSPACE_DIR, safe_path)
+    """Workspace disina hicbir sekilde cikilamayan guvenli yol cozumler.
+
+    Yalnizca '..' alt dizesini reddetmek, sembolik link tabanli kacislari veya
+    normpath sonrasi kalan kose durumlarini yakalamaz; bu yuzden nihai yol
+    gercek (realpath) workspace kokunun altinda olmadigi surece reddedilir.
+    """
+    raw = str(dosya_adi or "").strip()
+    if not raw:
+        return None, "❌ Hata: Dosya adı boş olamaz."
+
+    candidate = raw.replace("\\", "/").lstrip("/")
+    filepath = os.path.normpath(os.path.join(WORKSPACE_DIR, candidate))
+
+    real_workspace = os.path.realpath(WORKSPACE_DIR)
+    real_target = os.path.realpath(filepath)
+    if real_target != real_workspace and not real_target.startswith(real_workspace + os.sep):
+        return None, "❌ Hata: Workspace dışına çıkılamaz."
+
+    safe_path = os.path.relpath(filepath, WORKSPACE_DIR)
     return safe_path, filepath
 
 

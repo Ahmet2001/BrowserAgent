@@ -1,7 +1,7 @@
 """
 Ortak otomasyon koordinasyonu.
 
-Heartbeat, Telegram ve panelin ayni BaseModel / browser oturumunu
+Heartbeat, Telegram ve terminalin ayni BaseModel / browser oturumunu
 eszamanli kullanmasini engelleyen hafif runtime kilidi.
 """
 

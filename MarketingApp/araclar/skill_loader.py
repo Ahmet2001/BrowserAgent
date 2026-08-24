@@ -217,7 +217,7 @@ def disable_skill(name: str) -> bool:
 
 
 def list_skills() -> list[dict]:
-    """Panel-friendly skill listesi döner."""
+    """Yonetim arayuzleri icin skill listesini döner."""
     return [
         {
             "name": name,

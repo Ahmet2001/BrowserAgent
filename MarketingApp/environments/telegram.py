@@ -25,7 +25,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 from MarketingApp.llms import list_submodels
-from MarketingApp.enviroments.automation_runtime import (
+from MarketingApp.environments.automation_runtime import (
     release_automation,
     try_acquire_automation,
 )

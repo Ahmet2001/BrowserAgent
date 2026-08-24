@@ -73,6 +73,36 @@ DEFAULT_BUILTIN_AGENTS = [
         "system_prompt": "",
         "tools": [],
     },
+    {
+        "name": "arastirma_agent",
+        "type": "builtin",
+        "enabled": False,
+        "description": "Derinlemesine web arastirmasi ve kapsamli rapor yazma uzmani (Gemini Live API).",
+        "model": "default",
+        "tool_mode": "default",
+        "system_prompt": "",
+        "tools": [],
+    },
+    {
+        "name": "sistem_agent",
+        "type": "builtin",
+        "enabled": False,
+        "description": "Dosya yonetimi, sistem analizi ve kendini gelistirme uzmani (Gemini Live API).",
+        "model": "default",
+        "tool_mode": "default",
+        "system_prompt": "",
+        "tools": [],
+    },
+    {
+        "name": "vlm_agent",
+        "type": "builtin",
+        "enabled": False,
+        "description": "Ekran, klavye ve fare kontrol uzmani (Gemini Live API).",
+        "model": "default",
+        "tool_mode": "default",
+        "system_prompt": "",
+        "tools": [],
+    },
 ]
 BUILTIN_AGENT_NAMES = {item["name"] for item in DEFAULT_BUILTIN_AGENTS}
 
@@ -482,7 +512,7 @@ def create_builtin_agent_scaffold(entry: dict[str, Any]) -> dict[str, Any]:
 def upsert_agent_config(entry: dict[str, Any], *, create: bool = False) -> dict[str, Any]:
     incoming = normalize_agent_entry(entry)
     if create and incoming["type"] == "builtin":
-        raise AgentStudioError("Yeni builtin agent panelden olusturulamaz; yeni ajanlar config tipinde olmali.")
+        raise AgentStudioError("Yeni builtin agent runtime'dan olusturulamaz; yeni ajanlar config tipinde olmali.")
     config = load_agents_config()
     agents = list(config["agents"])
     index = next((i for i, item in enumerate(agents) if item["name"] == incoming["name"]), None)
