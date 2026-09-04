@@ -47,9 +47,10 @@ except Exception:
     RateLimitError = None
 
 
-_FILE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CONFIG_PATH = os.path.join(_FILE_DIR, "config", "heartbeat_config.yaml")
-_RUNTIME_DIR = os.path.join(_FILE_DIR, "workspace", "runtime")
+from MarketingApp.paths import config_path, workspace_path
+
+_CONFIG_PATH = config_path("heartbeat_config.yaml")
+_RUNTIME_DIR = workspace_path("runtime")
 _JOBSTORE_PATH = os.path.join(_RUNTIME_DIR, "apscheduler_jobs.sqlite")
 _RUNTIME_DB_PATH = os.path.join(_RUNTIME_DIR, "scheduler_runtime.sqlite")
 _TIMEZONE = ZoneInfo("Europe/Istanbul")

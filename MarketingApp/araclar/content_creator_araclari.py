@@ -21,12 +21,11 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+from MarketingApp.paths import WORKSPACE_DIR as _WORKSPACE_ROOT
 
 PEXELS_API_BASE = "https://api.pexels.com/v1"
 PEXELS_TIMEOUT_SECONDS = 20
 WEBSITE_TIMEOUT_SECONDS = 20
-_MARKETING_APP_ROOT = Path(__file__).resolve().parents[1]
-_WORKSPACE_ROOT = _MARKETING_APP_ROOT / "workspace"
 _GENERATED_POSTS_ROOT = _WORKSPACE_ROOT / "assets" / "generated_posts"
 _GENERATED_VIDEOS_ROOT = _WORKSPACE_ROOT / "assets" / "generated_videos"
 _HTML_POSTS_ROOT = _WORKSPACE_ROOT / "content_creator" / "html_posts"

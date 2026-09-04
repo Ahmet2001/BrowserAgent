@@ -20,9 +20,12 @@ except Exception:  # pragma: no cover - handled at runtime
     yaml = None
 
 
+from MarketingApp.paths import CONFIG_DIR, WORKSPACE_DIR
+
+# APP_DIR: bu paketin GERCEK kod konumu (workspace/config icin degil, kod-goreceli
+# yollar -- SUBMODELS_DIR, MODEL_ENV_PATH, pack kok cozumleme -- icin kullanilir).
+# Injectable workspace/config dizinleri icin MarketingApp.paths kullan.
 APP_DIR = Path(__file__).resolve().parents[1]
-CONFIG_DIR = APP_DIR / "config"
-WORKSPACE_DIR = APP_DIR / "workspace"
 CUSTOM_TOOLS_DIR = WORKSPACE_DIR / "custom_tools"
 AGENT_PACKS_DIR = WORKSPACE_DIR / "agent_packs"
 SUBMODELS_DIR = APP_DIR / "llms" / "SubModels"

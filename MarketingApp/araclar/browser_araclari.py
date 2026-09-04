@@ -24,8 +24,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 
 # ─── Dizinler ────────────────────────────────────────────────────────────────
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_COOKIES_DIR = os.path.join(_PROJECT_ROOT, "workspace", "cookies")
+from MarketingApp.paths import workspace_path
+
+_COOKIES_DIR = workspace_path("cookies")
 
 # ─── Global Driver Instance ─────────────────────────────────────────────────
 _driver = None
@@ -95,7 +96,7 @@ def browser_baslat(headless: bool = False) -> str:
             return f"Tarayıcı zaten açık ({current_mode}). Yeni bir tane açmak için önce browser_kapat() çağır."
 
         # ── Kalıcı Chrome Profili (login bilgileri saklanır) ──
-        profile_dir = os.path.join(_PROJECT_ROOT, "workspace", "chrome_profile")
+        profile_dir = workspace_path("chrome_profile")
         os.makedirs(profile_dir, exist_ok=True)
 
         # ── Anti-Detection + Performans Chrome Flags ──
@@ -311,7 +312,7 @@ def browser_chrome_baslat(port: int = 9222) -> str:
             )
         
         # Kalıcı profil dizini
-        profile_dir = os.path.join(_PROJECT_ROOT, "workspace", "browser_debug_profile")
+        profile_dir = workspace_path("browser_debug_profile")
         os.makedirs(profile_dir, exist_ok=True)
         
         # Tarayıcıyı debug modda başlat

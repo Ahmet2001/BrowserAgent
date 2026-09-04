@@ -17,9 +17,10 @@ except BaseException as pyautogui_import_error:
     pyautogui = None
     _PYAUTOGUI_IMPORT_ERROR = pyautogui_import_error
 
-# Workspace dizini (proje kök dizininde)
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_WORKSPACE_SCREENSHOTS = os.path.join(_PROJECT_ROOT, "workspace", "screenshots")
+from MarketingApp.paths import workspace_path
+
+# Workspace dizini (varsayilan: proje kok dizini; MIMAR_WORKSPACE_DIR ile override edilebilir)
+_WORKSPACE_SCREENSHOTS = workspace_path("screenshots")
 
 # Global bot instance (tg_bot.py tarafından set edilir)
 _BOT_INSTANCE = None

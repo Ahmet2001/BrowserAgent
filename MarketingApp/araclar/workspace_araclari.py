@@ -8,11 +8,10 @@ import os
 import re
 from datetime import datetime
 
-# Workspace dizini (proje kök dizininde)
-WORKSPACE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "workspace"
-)
+from MarketingApp.paths import WORKSPACE_DIR as _WORKSPACE_DIR
+
+# Workspace dizini (varsayilan: proje kok dizini; MIMAR_WORKSPACE_DIR ile override edilebilir)
+WORKSPACE_DIR = str(_WORKSPACE_DIR)
 
 
 def _ensure_workspace():

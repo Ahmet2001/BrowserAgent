@@ -36,8 +36,9 @@ from .browser_araclari import (
 )
 
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SOCIAL_DIR = os.path.join(_PROJECT_ROOT, "workspace", "social")
+from MarketingApp.paths import workspace_path
+
+_SOCIAL_DIR = workspace_path("social")
 _QUEUE_PATH = os.path.join(_SOCIAL_DIR, "x_reply_queue.json")
 _MARKET_STATE_PATH = os.path.join(_SOCIAL_DIR, "market_state.md")
 _IDEA_POOL_PATH = os.path.join(_SOCIAL_DIR, "idea_pool.md")

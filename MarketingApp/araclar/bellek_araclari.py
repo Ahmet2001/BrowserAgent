@@ -10,10 +10,9 @@ import os
 import json
 from datetime import datetime
 
-BELLEK_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "workspace", "uzun_vadeli_bellek.json"
-)
+from MarketingApp.paths import workspace_path
+
+BELLEK_FILE = workspace_path("uzun_vadeli_bellek.json")
 
 
 def _yukle_bellek() -> dict:
@@ -179,10 +178,7 @@ def rol_oku() -> str:
     Marketing botunun kişiliğini (Persona) barındıran role.md dosyasını okur.
     Bu dosya ajanın kimliğini, tonunu, kime hitap ettiğini ve yasaklı konuları içerir.
     """
-    rol_yolu = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "workspace", "role.md"
-    )
+    rol_yolu = workspace_path("role.md")
     if not os.path.exists(rol_yolu):
         return "⚠️ role.md dosyası bulunamadı. Lütfen önce çalışma alanında (.workspace/role.md) bir kimlik tanımlayın."
     try:
@@ -200,10 +196,7 @@ def rol_guncelle(yeni_icerik: str) -> str:
     Args:
         yeni_icerik: role.md dosyasının tamamen yeni içeriği (Markdown formatında).
     """
-    rol_yolu = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "workspace", "role.md"
-    )
+    rol_yolu = workspace_path("role.md")
     os.makedirs(os.path.dirname(rol_yolu), exist_ok=True)
     try:
         with open(rol_yolu, "w", encoding="utf-8") as f:

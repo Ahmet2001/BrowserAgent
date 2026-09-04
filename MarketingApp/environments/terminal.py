@@ -27,8 +27,9 @@ from MarketingApp.environments.heartbeat import (
 )
 
 
-_FILE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_HISTORY_FILE = os.path.join(_FILE_DIR, "workspace", ".system", "terminal_chat_history.json")
+from MarketingApp.paths import workspace_path
+
+_HISTORY_FILE = workspace_path(".system", "terminal_chat_history.json")
 _MAX_HISTORY = 30
 _MAX_CONTEXT_MESSAGES = 12
 _MAX_CONTEXT_CHARS = 5000
