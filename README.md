@@ -1,14 +1,59 @@
-# MarketingApp
+# Mimar
 
-AI-powered social media management, content creation, browser automation, and an interactive terminal control interface.
+**AI-powered social media management, content creation, and browser automation orchestrator.**
 
-[🇹🇷 Türkçe](#türkçe) | [🇬🇧 English](#english)
+Mimar is a Python agent platform built around a single orchestrator LLM (`BaseModel`) that delegates work to specialized sub-agents — social media, content creation, browser automation, research — each with its own tool set. It's controlled through an interactive terminal, and can also be embedded as a component ("agent leg") inside a larger system.
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ---
 
-## 🇬🇧 English
+## Table of Contents
 
-### Quick Start
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Terminal Commands](#terminal-commands)
+- [Using Mimar as an Embedded Agent](#using-mimar-as-an-embedded-agent)
+- [Project Structure](#project-structure)
+- [Requirements](#requirements)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Features
+
+- **Content Creator Agent** — text, image, and video content generation (HTML/CSS → PNG posts, stock footage → MP4 reels, website-to-post extraction).
+- **Social Media Agent** — X (Twitter), Instagram, and YouTube automation: posting, replies, likes, follows, notification scanning, market snapshots.
+- **Browser Agent** — Selenium-based navigation, DOM reading, and form interaction.
+- **Research Agent** — multi-query web research and report synthesis (Gemini Live API).
+- **System Agent** — file/workspace management and system status monitoring.
+- **VLM Agent** — screen capture, mouse/keyboard control with self-verifying vision loop.
+- **Agent Studio** — add, enable/disable, and reconfigure agents and tools through YAML config, no code changes required.
+- **Agent Packs** — plug-and-play bundles of agents, tools, and prompts.
+- **Heartbeat Scheduler** — cron/interval-based background jobs (APScheduler), managed from the terminal.
+- **Interactive terminal control interface** — inspect and toggle agents/tools, run heartbeat jobs, review logs, approve risky actions, all from one CLI session.
+
+## Architecture
+
+```
+main.py
+ ├─ background tasks: heartbeat_loop, telegram bot (optional), discord bot (optional)
+ └─ TerminalManager (foreground)
+       └─ AutomationCoordinator (mutex: only one caller touches BaseModel/browser at a time)
+             └─ BaseModel.text_query()
+                   └─ tool-calling loop (≤12 turns, repeat-call guard)
+                         ├─ base tools (memory, workspace, search, …)
+                         └─ SubModel agents (each runs its own inner LLM + tool loop)
+```
+
+- **`BaseModel`** (`MarketingApp/llms/BaseModel.py`) is the orchestrator: an OpenAI-compatible chat-completions loop that calls tools and sub-agents until it has a final answer.
+- **`SubModel`** agents (`MarketingApp/llms/SubModels/`) are self-contained mini-agents, each with their own model and tool subset, exposed to `BaseModel` as a single callable tool.
+- **`AutomationCoordinator`** (`MarketingApp/environments/automation_runtime.py`) is a lock ensuring the terminal, heartbeat, and Telegram/Discord triggers never touch the shared browser session concurrently.
+- **`Agent Studio`** (`MarketingApp/llms/agent_studio.py`) reads `config/agents.yaml`, `config/custom_tools.yaml`, and `config/agent_packs.yaml` to assemble the runtime — agents and tools can be added, toggled, or reconfigured without touching code.
+
+## Quick Start
 
 ```bash
 git clone https://github.com/Ahmet2001/BrowserAgent.git
@@ -17,123 +62,102 @@ chmod +x run.sh
 ./run.sh
 ```
 
-`run.sh` starts an interactive terminal session. Type a message and press enter to chat with the agent, or use one of the built-in commands:
+`run.sh`:
+1. Creates a `.venv` if one doesn't exist.
+2. Installs/updates packages from `requirements.txt`.
+3. Launches the interactive terminal via `python -m MarketingApp.main`.
 
-```text
-/status                         Show system and channel status
-/agents                         List agents
-/agent <name> on|off|toggle     Toggle an agent
-/tools [query]                  List or filter tools
-/tool <name> on|off|toggle      Toggle a tool
-/logs [count]                   Show recent logs (default 15)
-/heartbeat                      Show scheduler and job status
-/heartbeat run|pause|resume <id>
-/heartbeat reload               Reload the heartbeat config from disk
-/reload                         Reload agent/custom tool config
-/history                        Show terminal chat history
-/clear                          Clear terminal chat history
-/exit                           Shut down safely
-```
-
-### What run.sh Does
-
-- Creates `.venv` if it doesn't exist
-- Installs/updates packages from `requirements.txt`
-- Launches the bot and the interactive terminal via `python -m MarketingApp.main`
-
-### Environment Files
-
-Copy `.env.example` to `.env` and fill in your keys:
-
-- `.env`: main model/provider and Telegram settings
-- `.env.local` (optional): local override settings
-- `.env.secrets` (optional): additional API keys (Pexels, etc.)
-
-### Features
-
-- **Content Creator Agent** – Text, image, and video content generation
-- **Social Media Agent** – X (Twitter) automation, posting, replies
-- **Browser Agent** – Playwright/Selenium-based browser automation
-- **Research Agent** – Topic research and data gathering
-- **System Agent** – System monitoring and computer control (PyAutoGUI)
-- **Agent Studio** – Terminal-managed configuration for building and toggling custom agents
-- **Agent Packs** – Plug-and-play agent bundles
-
-### Requirements
-
-- Python 3.11+
-- Chrome browser (for X automation)
-- An active X (Twitter) session in a Chrome profile
-
-For PNG/video rendering, install Playwright browser:
+For PNG/video rendering, also install the Playwright browser once:
 
 ```bash
 source .venv/bin/activate
 playwright install chromium
 ```
 
-### License
+## Configuration
 
-MIT © 2026 Ahmet Rıfat Öztürk
+Copy `.env.example` to `.env` and fill in your keys. Settings are loaded in this order (later files override earlier ones): `.env` → `.env.local` → `.env.model` → `.env.secrets`.
 
----
+| File | Purpose |
+|---|---|
+| `.env` | Base model/provider settings, Telegram token |
+| `.env.local` *(optional)* | Local overrides, kept out of version control |
+| `.env.model` *(optional)* | Model-specific overrides |
+| `.env.secrets` *(optional)* | Additional API keys (Pexels, etc.) |
 
-## 🇹🇷 Türkçe
+Key variables:
 
-AI destekli sosyal medya, içerik üretimi, browser otomasyonu ve Agent Studio paneli.
+| Variable | Description |
+|---|---|
+| `MODEL_PROVIDER` | `gemini` or an OpenAI-compatible provider |
+| `OPENAI_COMPAT_BASE_URL` | Base URL for the OpenAI-compatible endpoint |
+| `BASE_MODEL_NAME` / `SUBMODEL_MODEL_NAME` / `BROWSER_AGENT_MODEL` | Model IDs per role |
+| `GEMINI_API_KEY` / `GEMINI_API_KEY_SECONDARY` | Gemini API keys (with failover) |
+| `TELEGRAM_TOKEN` / `DISCORD_TOKEN` | Optional chat platform integrations |
+| `PEXELS_API_KEY` | Stock photo/video search for the Content Creator agent |
 
-### Hemen Çalıştır
+All API keys and tokens live only in the gitignored `.env*` files — never commit real credentials.
 
-```bash
-git clone https://github.com/Ahmet2001/BrowserAgent.git
-cd BrowserAgent
-chmod +x run.sh
-./run.sh
+## Terminal Commands
+
+Once running, type a message to chat with Mimar, or use a command:
+
+| Command | Description |
+|---|---|
+| `/help`, `/?` | Show the command list |
+| `/status` | Show model, provider, uptime, and channel status |
+| `/agents` | List all registered agents |
+| `/agent <name> on\|off\|toggle` | Enable/disable an agent |
+| `/tools [query]` | List or filter tools |
+| `/tool <name> on\|off\|toggle` | Enable/disable a tool |
+| `/logs [count]` | Show recent logs (default 15) |
+| `/heartbeat` | Show scheduler and job status |
+| `/heartbeat run\|pause\|resume <id>` | Control a scheduled job |
+| `/heartbeat reload` | Reload the heartbeat config from disk |
+| `/reload` | Reload agent/custom tool config |
+| `/history` | Show terminal chat history |
+| `/clear` | Clear terminal chat history |
+| `/exit` | Shut down safely |
+
+## Using Mimar as an Embedded Agent
+
+`MarketingApp/agent_api.py` exposes a thin, side-effect-free API for calling Mimar from another orchestrator (e.g. an asset-generation pipeline) instead of running it as a standalone terminal app:
+
+```python
+from MarketingApp.agent_api import MimarAgent
+
+agent = MimarAgent(workspace_dir="/path/to/pool/brandX/workspace")
+result = await agent.run("Draft a post about today's topic for X")
+print(result.text)
 ```
 
-Panel açıldıktan sonra:
+`MimarAgent` never starts the heartbeat/Telegram/Discord background tasks. Workspace and config directories can be redirected per instance via `workspace_dir`/`config_dir` (see the module docstring for the single-process-per-workspace caveat).
 
-```text
-http://127.0.0.1:8001/panel
+## Project Structure
+
+```
+MarketingApp/
+├── agent_api.py         # Embeddable agent wrapper (MimarAgent)
+├── paths.py              # Central, overridable workspace/config path resolution
+├── main.py               # Entry point (python -m MarketingApp.main)
+├── araclar/               # Tools: browser, search, memory, content creation, workspace, skills
+├── config/                # agents.yaml, custom_tools.yaml, agent_packs.yaml, heartbeat_config.yaml
+├── environments/          # terminal.py, heartbeat.py, telegram.py, discord_bot.py, automation_runtime.py
+├── llms/                  # BaseModel orchestrator, Agent Studio, SubModels/
+├── legacy/panel/          # Archived FastAPI web panel (superseded by the terminal interface)
+└── workspace/              # Runtime data: memory, drafts, assets, custom tools, agent packs
 ```
 
-### run.sh Ne Yapar?
-
-- `.venv` yoksa oluşturur
-- `requirements.txt` içindeki paketleri kurar/günceller
-- `python -m MarketingApp.main` ile botu ve panel API'sini başlatır
-
-### Ortam Dosyaları
-
-`.env.example` dosyasını `.env` olarak kopyalayıp kendi anahtarlarınızı girin:
-
-- `.env`: ana model/provider ve Telegram ayarları
-- `.env.local` (opsiyonel): yerel override ayarları
-- `.env.secrets` (opsiyonel): Pexels gibi ek API anahtarları
-
-### Özellikler
-
-- **Content Creator Agent** – Metin, görsel ve video içerik üretimi
-- **Sosyal Medya Agent** – X (Twitter) otomasyonu, post, yanıt
-- **Browser Agent** – Playwright/Selenium tabanlı tarayıcı otomasyonu
-- **Araştırma Agent** – Konu araştırması ve veri toplama
-- **Sistem Agent** – Sistem izleme ve bilgisayar kontrolü (PyAutoGUI)
-- **Agent Studio** – Web panel ile agent yönetimi ve özel agent oluşturma
-- **Agent Paketleri** – Tak-çalıştır agent bundle desteği
-
-### Gereksinimler
+## Requirements
 
 - Python 3.11+
-- Chrome tarayıcı (X otomasyonu için)
-- Chrome profilinde aktif X (Twitter) oturumu
+- Chrome browser (for X/social automation)
+- An active X (Twitter) session in a Chrome profile, for social features
 
-PNG/video üretimi için Playwright tarayıcısını kurun:
+## Contributing
 
-```bash
-source .venv/bin/activate
-playwright install chromium
-```
+Issues and pull requests are welcome. Please keep changes scoped and include a short description of what changed and why.
 
-### Lisans
+## License
 
-MIT © 2026 Ahmet Rıfat Öztürk
+MIT © 2026 Ahmet Rıfat Öztürk — see [LICENSE](LICENSE).
