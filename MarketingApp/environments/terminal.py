@@ -156,7 +156,7 @@ class TerminalManager:
         elif command == "/agent":
             await self._manage_agent(args)
         elif command == "/tools":
-            self._print_tools(" ".join(args))
+            self._print_tools(args)
         elif command == "/tool":
             self._manage_tool(args)
         elif command == "/logs":
@@ -188,6 +188,9 @@ Komutlar
   /agent pack preview <yol>       Pack'i kurmadan incele
   /agent pack install <yol>       Pack kur (--overwrite, --yes)
   /tools [arama]                  Tool'lari listele veya filtrele
+  /tools --group <ad>             Bir gruba ait tool'lari listele
+  /tools --category <ad>          Bir kategorideki tool'lari listele
+  /tools --list-groups            Mevcut grup ve kategorileri say
   /tool <ad> on|off|toggle        Tool durumunu degistir
   /logs [adet]                    Son loglari goster (varsayilan 15)
   /heartbeat                      Zamanlayici ve gorev durumunu goster
@@ -200,20 +203,29 @@ Komutlar
   /exit                           Uygulamayi guvenli sekilde kapat
 
 Ajan bayraklari
-  --model <ad>          Ajanin kullanacagi model (varsayilan: default)
-  --tools a,b,c         Tool listesini komple ayarla (tool_mode custom olur)
-  --add-tools a,b       Mevcut listeye tool ekle (sadece edit)
-  --remove-tools a,b    Mevcut listeden tool cikar (sadece edit)
+  --model <ad>              Ajanin kullanacagi model (varsayilan: default)
+  --tools a,b,c             Tool listesini komple ayarla
+  --tool-group g1,g2        Bir grubun tamamini ekle (bkz. /tools --list-groups)
+  --tool-category c1,c2     Bir kategorinin tamamini ekle
+  --add-tools a,b           Mevcut listeye tool ekle (sadece edit)
+  --remove-tools a,b        Mevcut listeden tool cikar (sadece edit)
+  --remove-tool-group g1    Bir grubun tamamini cikar (sadece edit)
+  --remove-tool-category c1 Bir kategorinin tamamini cikar (sadece edit)
   --tool-mode default|custom
-  --prompt "..."        System prompt
-  --desc "..."          Aciklama
-  --builtin             SubModels altinda gercek .py dosyasi uret (sadece create)
-  --disabled            Pasif olarak olustur (sadece create)
-  --enable / --disable  Ajani aktif/pasif yap (sadece edit)
+  --prompt "..."            System prompt
+  --desc "..."              Aciklama
+  --builtin                 SubModels altinda gercek .py dosyasi uret (sadece create)
+  --disabled                Pasif olarak olustur (sadece create)
+  --enable / --disable      Ajani aktif/pasif yap (sadece edit)
 
-Ornek
-  /agent create rapor_ajani --model default --tools workspace_oku,workspace_yaz \\
+NOT: config tipi ajanlar varsayilan tool setini almaz; tool vermezsen ajan
+tool'suz calisir. Varsayilan set fallback'i sadece builtin ajanlarda vardir.
+
+Ornekler
+  /agent create rapor_ajani --tool-category workspace,memory \\
       --desc "Haftalik rapor derleyici" --prompt "Sen rapor derleyen bir ajansin."
+  /agent edit rapor_ajani --tool-group browser_agent
+  /agent edit rapor_ajani --remove-tool-category browser
 
 Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
 """.strip()
@@ -312,11 +324,15 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
     def _create_agent(self, args: list[str]) -> None:
         positional, flags = self._parse_flags(args, bool_flags={"builtin", "disabled"})
         if len(positional) != 1:
-            self._emit('Kullanim: /agent create <ad> [--model M] [--tools a,b] [--prompt "..."] [--desc "..."] [--tool-mode default|custom] [--builtin] [--disabled]')
+            self._emit('Kullanim: /agent create <ad> [--model M] [--tools a,b] [--tool-group g1,g2] [--tool-category c1,c2] [--prompt "..."] [--desc "..."] [--tool-mode default|custom] [--builtin] [--disabled]')
             return
 
         name = _studio().validate_agent_name(positional[0])
         tools = self._split_name_list(flags.get("tools"))
+        expanded = self._expand_tool_selectors(flags, group_key="tool_group", category_key="tool_category")
+        if expanded:
+            self._emit(f"Grup/kategori secimi {len(expanded)} tool'a genisletildi.")
+            tools = list(dict.fromkeys(tools + expanded))
         tool_mode = str(flags.get("tool_mode") or ("custom" if tools else "default")).lower()
         entry = {
             "name": name,
@@ -329,6 +345,14 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             "tools": tools,
         }
         self._warn_unknown_tools(tools)
+        if not flags.get("builtin") and not tools:
+            self._emit(
+                self._color(
+                    "Uyari: config ajanlari varsayilan tool setini almaz; tool verilmedigi icin bu ajan "
+                    "tool'suz calisacak. --tools / --tool-group / --tool-category ile ekleyebilirsin.",
+                    "yellow",
+                )
+            )
 
         if flags.get("builtin"):
             result = _studio().create_builtin_agent_scaffold(entry)
@@ -345,7 +369,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
     def _edit_agent(self, args: list[str]) -> None:
         positional, flags = self._parse_flags(args, bool_flags={"enable", "disable"})
         if len(positional) != 1 or not flags:
-            self._emit('Kullanim: /agent edit <ad> [--model M] [--tools a,b] [--add-tools a,b] [--remove-tools a,b] [--tool-mode default|custom] [--prompt "..."] [--desc "..."] [--enable|--disable]')
+            self._emit('Kullanim: /agent edit <ad> [--model M] [--tools a,b] [--add-tools a,b] [--remove-tools a,b] [--tool-group g1,g2] [--remove-tool-group g1] [--tool-category c1] [--remove-tool-category c1] [--tool-mode default|custom] [--prompt "..."] [--desc "..."] [--enable|--disable]')
             return
 
         name = _studio().validate_agent_name(positional[0])
@@ -371,6 +395,21 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             additions = self._split_name_list(flags["add_tools"])
             merged["tools"] = list(dict.fromkeys(list(merged.get("tools") or []) + additions))
             tools_changed = True
+        group_additions = self._expand_tool_selectors(flags, group_key="tool_group", category_key="tool_category")
+        if group_additions:
+            self._emit(f"Grup/kategori secimi {len(group_additions)} tool'a genisletildi.")
+            merged["tools"] = list(dict.fromkeys(list(merged.get("tools") or []) + group_additions))
+            tools_changed = True
+
+        group_removals = self._expand_tool_selectors(
+            flags, group_key="remove_tool_group", category_key="remove_tool_category"
+        )
+        if group_removals:
+            self._emit(f"Grup/kategori cikarmasi {len(group_removals)} tool'a genisletildi.")
+            dropped = set(group_removals)
+            merged["tools"] = [item for item in (merged.get("tools") or []) if item not in dropped]
+            tools_changed = True
+
         if "remove_tools" in flags:
             removals = set(self._split_name_list(flags["remove_tools"]))
             merged["tools"] = [item for item in (merged.get("tools") or []) if item not in removals]
@@ -498,10 +537,13 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         if entry.get("description"):
             self._emit(f"  Aciklama  : {entry['description']}")
         tools = entry.get("tools") or []
-        if entry.get("tool_mode") == "custom":
-            self._emit(f"  Tool'lar  : {', '.join(tools) if tools else '(bos)'}")
+        if tools:
+            self._emit(f"  Tool'lar  : {', '.join(tools)} ({len(tools)} adet)")
+        elif entry.get("type") == "builtin" and entry.get("tool_mode") != "custom":
+            self._emit(f"  Tool'lar  : (varsayilan set: '{entry['name']}' grubu)")
         else:
-            self._emit("  Tool'lar  : (varsayilan set)")
+            # Config ajanlari icin tool_mode yok sayilir; bos liste = gercekten tool'suz.
+            self._emit(self._color("  Tool'lar  : (bos - bu ajan hicbir tool kullanamaz)", "yellow"))
         prompt = str(entry.get("system_prompt") or "").strip()
         if prompt:
             first_line = prompt.splitlines()[0]
@@ -512,6 +554,47 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
     def _find_agent_entry(name: str) -> dict[str, Any] | None:
         agents = _studio().load_agents_config()["agents"]
         return next((item for item in agents if item["name"] == name), None)
+
+    @staticmethod
+    def _tool_taxonomy() -> list[dict[str, Any]]:
+        """Tool kayit defteri: her tool icin ad, kategori ve ait oldugu gruplar."""
+        return _studio().build_tool_registry()["tools"]
+
+    @staticmethod
+    def _assert_known_taxonomy(registry: list[dict[str, Any]], groups, categories) -> None:
+        """Bilinmeyen grup/kategori adlarini sessizce bos sonuca dusurmek yerine hata verir."""
+        known_groups = sorted({group for tool in registry for group in tool.get("groups") or []})
+        known_categories = sorted({tool["category"] for tool in registry})
+
+        unknown_groups = [item for item in groups if item not in known_groups]
+        if unknown_groups:
+            raise ValueError(
+                f"Bilinmeyen tool grubu: {', '.join(unknown_groups)}. Gecerli gruplar: {', '.join(known_groups)}"
+            )
+        unknown_categories = [item for item in categories if item not in known_categories]
+        if unknown_categories:
+            raise ValueError(
+                f"Bilinmeyen tool kategorisi: {', '.join(unknown_categories)}. "
+                f"Gecerli kategoriler: {', '.join(known_categories)}"
+            )
+
+    def _expand_tool_selectors(self, flags: dict[str, Any], *, group_key: str, category_key: str) -> list[str]:
+        """--tool-group / --tool-category degerlerini tool adlarina cevirir."""
+        wanted_groups = self._split_name_list(flags.get(group_key))
+        wanted_categories = self._split_name_list(flags.get(category_key))
+        if not wanted_groups and not wanted_categories:
+            return []
+
+        registry = self._tool_taxonomy()
+        self._assert_known_taxonomy(registry, wanted_groups, wanted_categories)
+
+        selected = [
+            tool["name"]
+            for tool in registry
+            if any(group in wanted_groups for group in tool.get("groups") or [])
+            or tool["category"] in wanted_categories
+        ]
+        return sorted(dict.fromkeys(selected))
 
     def _warn_unknown_tools(self, tools: list[str]) -> None:
         if not tools:
@@ -577,12 +660,49 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             unique.setdefault(tool.get("name"), tool)
         return [tool for name, tool in sorted(unique.items()) if name]
 
-    def _print_tools(self, query: str = "") -> None:
-        needle = query.strip().lower()
-        tools = [
-            tool for tool in self._all_tools()
-            if not needle or needle in tool.get("name", "").lower() or needle in tool.get("desc", "").lower()
-        ]
+    def _print_tools(self, args: list[str]) -> None:
+        try:
+            positional, flags = self._parse_flags(args, bool_flags={"list_groups"})
+        except ValueError as exc:
+            self._emit(self._color(str(exc), "red"))
+            return
+
+        if flags.get("list_groups"):
+            self._print_tool_taxonomy()
+            return
+
+        needle = " ".join(positional).strip().lower()
+        wanted_groups = set(self._split_name_list(flags.get("group")))
+        wanted_categories = set(self._split_name_list(flags.get("category")))
+
+        taxonomy: dict[str, dict[str, Any]] = {}
+        if wanted_groups or wanted_categories:
+            try:
+                registry = self._tool_taxonomy()
+                self._assert_known_taxonomy(registry, wanted_groups, wanted_categories)
+                taxonomy = {tool["name"]: tool for tool in registry}
+            except ValueError as exc:
+                self._emit(self._color(str(exc), "red"))
+                return
+            except Exception as exc:
+                self._emit(self._color(f"Tool taksonomisi okunamadi: {exc}", "red"))
+                return
+
+        tools = []
+        for tool in self._all_tools():
+            name = tool.get("name", "")
+            if needle and needle not in name.lower() and needle not in tool.get("desc", "").lower():
+                continue
+            if wanted_groups or wanted_categories:
+                meta = taxonomy.get(name)
+                if not meta:
+                    continue
+                if wanted_groups and not (wanted_groups & set(meta.get("groups") or [])):
+                    continue
+                if wanted_categories and meta.get("category") not in wanted_categories:
+                    continue
+            tools.append(tool)
+
         self._emit(self._color(f"Tool'lar ({len(tools)})", "bold"))
         if not tools:
             self._emit("  Eslesen tool yok.")
@@ -590,6 +710,29 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         for tool in tools:
             state = "ON " if tool.get("active", True) else "OFF"
             self._emit(f"  [{state}] {tool.get('name')}")
+
+    def _print_tool_taxonomy(self) -> None:
+        try:
+            registry = self._tool_taxonomy()
+        except Exception as exc:
+            self._emit(self._color(f"Tool taksonomisi okunamadi: {exc}", "red"))
+            return
+
+        group_counts: dict[str, int] = {}
+        category_counts: dict[str, int] = {}
+        for tool in registry:
+            for group in tool.get("groups") or []:
+                group_counts[group] = group_counts.get(group, 0) + 1
+            category_counts[tool["category"]] = category_counts.get(tool["category"], 0) + 1
+
+        self._emit(self._color(f"Tool gruplari ({len(group_counts)})", "bold"))
+        for name, count in sorted(group_counts.items(), key=lambda item: (-item[1], item[0])):
+            self._emit(f"  {name:24} {count} tool")
+        self._emit(self._color(f"Tool kategorileri ({len(category_counts)})", "bold"))
+        for name, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0])):
+            self._emit(f"  {name:24} {count} tool")
+        self._emit(f"Toplam {len(registry)} tool.")
+        self._emit("Kullanim: /tools --group <ad>  |  /tools --category <ad>")
 
     def _manage_tool(self, args: list[str]) -> None:
         if len(args) != 2:
