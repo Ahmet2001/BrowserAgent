@@ -29,10 +29,20 @@ from MarketingApp.environments.heartbeat import (
 
 from MarketingApp.paths import workspace_path
 
+
+def _studio():
+    """agent_studio'yu tembel yukle; import aninda llms paketini ayaga kaldirmamak icin."""
+    from MarketingApp.llms import agent_studio
+
+    return agent_studio
+
+
 _HISTORY_FILE = workspace_path(".system", "terminal_chat_history.json")
 _MAX_HISTORY = 30
 _MAX_CONTEXT_MESSAGES = 12
 _MAX_CONTEXT_CHARS = 5000
+_AGENT_SWITCH_WORDS = {"on", "off", "toggle", "ac", "kapat", "aktif", "pasif", "degistir"}
+_AFFIRMATIVE_ANSWERS = {"e", "evet", "y", "yes"}
 
 
 class TerminalManager:
@@ -144,7 +154,7 @@ class TerminalManager:
         elif command == "/agents":
             self._print_agents()
         elif command == "/agent":
-            self._manage_agent(args)
+            await self._manage_agent(args)
         elif command == "/tools":
             self._print_tools(" ".join(args))
         elif command == "/tool":
@@ -170,6 +180,13 @@ Komutlar
   /status                         Sistem ve kanal durumunu goster
   /agents                         Ajanlari listele
   /agent <ad> on|off|toggle       Ajan durumunu degistir
+  /agent show <ad>                Ajan detayini goster
+  /agent create <ad> [bayrak]     Yeni ajan olustur
+  /agent edit <ad> [bayrak]       Var olan ajani duzenle
+  /agent delete <ad> [--yes]      Config ajanini sil
+  /agent pack list                Kurulu agent pack'leri listele
+  /agent pack preview <yol>       Pack'i kurmadan incele
+  /agent pack install <yol>       Pack kur (--overwrite, --yes)
   /tools [arama]                  Tool'lari listele veya filtrele
   /tool <ad> on|off|toggle        Tool durumunu degistir
   /logs [adet]                    Son loglari goster (varsayilan 15)
@@ -181,6 +198,22 @@ Komutlar
   /history                        Terminal sohbet gecmisini goster
   /clear                          Terminal sohbet gecmisini temizle
   /exit                           Uygulamayi guvenli sekilde kapat
+
+Ajan bayraklari
+  --model <ad>          Ajanin kullanacagi model (varsayilan: default)
+  --tools a,b,c         Tool listesini komple ayarla (tool_mode custom olur)
+  --add-tools a,b       Mevcut listeye tool ekle (sadece edit)
+  --remove-tools a,b    Mevcut listeden tool cikar (sadece edit)
+  --tool-mode default|custom
+  --prompt "..."        System prompt
+  --desc "..."          Aciklama
+  --builtin             SubModels altinda gercek .py dosyasi uret (sadece create)
+  --disabled            Pasif olarak olustur (sadece create)
+  --enable / --disable  Ajani aktif/pasif yap (sadece edit)
+
+Ornek
+  /agent create rapor_ajani --model default --tools workspace_oku,workspace_yaz \\
+      --desc "Haftalik rapor derleyici" --prompt "Sen rapor derleyen bir ajansin."
 
 Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
 """.strip()
@@ -218,11 +251,42 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
                 f"{agent.get('tool_count', len(agent.get('tools') or []))} tool"
             )
 
-    def _manage_agent(self, args: list[str]) -> None:
-        if len(args) != 2:
-            self._emit("Kullanim: /agent <ad> on|off|toggle")
+    async def _manage_agent(self, args: list[str]) -> None:
+        if not args:
+            self._emit("Kullanim: /agent <ad> on|off|toggle  ya da  /agent create|edit|delete|show|list|pack ...")
             return
-        name, action = args[0], args[1].lower()
+
+        # Eski kullanim once: /agent <ad> on|off|toggle
+        if len(args) == 2 and args[1].lower() in _AGENT_SWITCH_WORDS:
+            self._toggle_agent(args[0], args[1].lower())
+            return
+
+        studio = _studio()
+        action = args[0].lower()
+        rest = args[1:]
+        try:
+            if action == "list":
+                self._print_agents()
+            elif action == "show":
+                self._show_agent(rest)
+            elif action == "create":
+                self._create_agent(rest)
+            elif action == "edit":
+                self._edit_agent(rest)
+            elif action == "delete":
+                await self._delete_agent(rest)
+            elif action == "pack":
+                await self._manage_agent_pack(rest)
+            else:
+                self._emit("Kullanim: /agent <ad> on|off|toggle  ya da  /agent create|edit|delete|show|list|pack ...")
+        except studio.AgentStudioError as exc:
+            self._emit(self._color(f"Agent Studio hatasi: {exc}", "red"))
+        except ValueError as exc:
+            self._emit(self._color(str(exc), "red"))
+        except Exception as exc:
+            self._emit(self._color(f"Ajan islemi basarisiz: {exc}", "red"))
+
+    def _toggle_agent(self, name: str, action: str) -> None:
         current = getattr(self.base_model, "active_agents", {}).get(name)
         if current is None:
             self._emit(self._color(f"Ajan bulunamadi: {name}", "red"))
@@ -233,6 +297,275 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             self._emit(self._color(f"{name}: {'aktif' if active else 'pasif'}", "green"))
         except ValueError as exc:
             self._emit(str(exc))
+
+    def _show_agent(self, args: list[str]) -> None:
+        if len(args) != 1:
+            self._emit("Kullanim: /agent show <ad>")
+            return
+        name = _studio().validate_agent_name(args[0])
+        entry = self._find_agent_entry(name)
+        if entry is None:
+            self._emit(self._color(f"Ajan bulunamadi: {name}", "red"))
+            return
+        self._describe_agent(entry)
+
+    def _create_agent(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"builtin", "disabled"})
+        if len(positional) != 1:
+            self._emit('Kullanim: /agent create <ad> [--model M] [--tools a,b] [--prompt "..."] [--desc "..."] [--tool-mode default|custom] [--builtin] [--disabled]')
+            return
+
+        name = _studio().validate_agent_name(positional[0])
+        tools = self._split_name_list(flags.get("tools"))
+        tool_mode = str(flags.get("tool_mode") or ("custom" if tools else "default")).lower()
+        entry = {
+            "name": name,
+            "type": "builtin" if flags.get("builtin") else "config",
+            "enabled": not flags.get("disabled"),
+            "description": flags.get("desc") or flags.get("description") or "",
+            "model": flags.get("model") or "default",
+            "tool_mode": tool_mode,
+            "system_prompt": flags.get("prompt") or "",
+            "tools": tools,
+        }
+        self._warn_unknown_tools(tools)
+
+        if flags.get("builtin"):
+            result = _studio().create_builtin_agent_scaffold(entry)
+            saved = result["agent"]
+            self._emit(self._color(f"Builtin ajan olusturuldu: {saved['name']}", "green"))
+            self._emit(f"  Submodel dosyasi: {result['path']}")
+        else:
+            saved = _studio().upsert_agent_config(entry, create=True)
+            self._emit(self._color(f"Config ajani olusturuldu: {saved['name']}", "green"))
+
+        self._describe_agent(saved)
+        self._reload_agents()
+
+    def _edit_agent(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"enable", "disable"})
+        if len(positional) != 1 or not flags:
+            self._emit('Kullanim: /agent edit <ad> [--model M] [--tools a,b] [--add-tools a,b] [--remove-tools a,b] [--tool-mode default|custom] [--prompt "..."] [--desc "..."] [--enable|--disable]')
+            return
+
+        name = _studio().validate_agent_name(positional[0])
+        current = self._find_agent_entry(name)
+        if current is None:
+            self._emit(self._color(f"Ajan bulunamadi: {name}", "red"))
+            return
+
+        merged = dict(current)
+        tools_changed = False
+
+        if "model" in flags:
+            merged["model"] = flags["model"]
+        if "desc" in flags or "description" in flags:
+            merged["description"] = flags.get("desc") or flags.get("description") or ""
+        if "prompt" in flags:
+            merged["system_prompt"] = flags["prompt"]
+
+        if "tools" in flags:
+            merged["tools"] = self._split_name_list(flags["tools"])
+            tools_changed = True
+        if "add_tools" in flags:
+            additions = self._split_name_list(flags["add_tools"])
+            merged["tools"] = list(dict.fromkeys(list(merged.get("tools") or []) + additions))
+            tools_changed = True
+        if "remove_tools" in flags:
+            removals = set(self._split_name_list(flags["remove_tools"]))
+            merged["tools"] = [item for item in (merged.get("tools") or []) if item not in removals]
+            tools_changed = True
+
+        if tools_changed:
+            self._warn_unknown_tools(merged.get("tools") or [])
+            merged["tool_mode"] = "custom"
+        if "tool_mode" in flags:
+            merged["tool_mode"] = str(flags["tool_mode"]).lower()
+
+        if flags.get("enable"):
+            merged["enabled"] = True
+        if flags.get("disable"):
+            merged["enabled"] = False
+
+        saved = _studio().upsert_agent_config(merged, create=False)
+        self._emit(self._color(f"Ajan guncellendi: {saved['name']}", "green"))
+        self._describe_agent(saved)
+        self._reload_agents()
+
+    async def _delete_agent(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"yes"})
+        if len(positional) != 1:
+            self._emit("Kullanim: /agent delete <ad> [--yes]")
+            return
+
+        name = _studio().validate_agent_name(positional[0])
+        entry = self._find_agent_entry(name)
+        if entry is None:
+            self._emit(self._color(f"Ajan bulunamadi: {name}", "red"))
+            return
+        if entry.get("type") == "builtin":
+            self._emit(self._color("Builtin ajan silinemez; /agent <ad> off ile pasife alabilirsin.", "yellow"))
+            return
+
+        if not flags.get("yes") and not await self._confirm(f"  {name} agents.yaml icinden silinecek. Onayliyor musun? [e/H]: "):
+            self._emit("Silme iptal edildi.")
+            return
+
+        deleted = _studio().delete_agent_config(name)
+        self._emit(self._color(f"Ajan silindi: {deleted['name']}", "green"))
+        self._reload_agents()
+
+    async def _manage_agent_pack(self, args: list[str]) -> None:
+        if not args:
+            self._emit("Kullanim: /agent pack list|preview <yol>|install <yol> [--overwrite] [--yes]")
+            return
+
+        action = args[0].lower()
+        rest = args[1:]
+
+        if action == "list":
+            packs = _studio().load_agent_packs_config()["installed_packs"]
+            self._emit(self._color(f"Kurulu pack'ler ({len(packs)})", "bold"))
+            if not packs:
+                self._emit("  Kurulu pack yok.")
+            for pack in packs:
+                self._emit(f"  {pack['name']} v{pack['version']} | {pack['type']}")
+                self._emit(
+                    f"    Ajan: {', '.join(pack['installed_agents']) or '-'} | "
+                    f"Tool: {', '.join(pack['installed_tools']) or '-'}"
+                )
+            return
+
+        if action not in {"preview", "install"}:
+            self._emit("Kullanim: /agent pack list|preview <yol>|install <yol> [--overwrite] [--yes]")
+            return
+
+        positional, flags = self._parse_flags(rest, bool_flags={"overwrite", "yes"})
+        if len(positional) != 1:
+            self._emit(f"Kullanim: /agent pack {action} <yol>" + (" [--overwrite] [--yes]" if action == "install" else ""))
+            return
+
+        path_value = positional[0]
+        preview = _studio().preview_agent_pack(path_value)
+        self._print_pack_preview(preview)
+
+        if action == "preview":
+            return
+        if not preview["installable"]:
+            self._emit(self._color("Pack kurulabilir durumda degil; kurulum yapilmadi.", "red"))
+            return
+        if not flags.get("yes") and not await self._confirm(f"  {preview['name']} kurulacak. Onayliyor musun? [e/H]: "):
+            self._emit("Kurulum iptal edildi.")
+            return
+
+        result = _studio().install_agent_pack(path_value, overwrite=bool(flags.get("overwrite")))
+        pack = result["pack"]
+        self._emit(self._color(f"Pack kuruldu: {pack['name']} v{pack['version']}", "green"))
+        self._emit(f"  Konum: {pack['installed_path']}")
+        self._emit(f"  Ajanlar: {', '.join(pack['installed_agents']) or '-'}")
+        self._emit(f"  Tool'lar: {', '.join(pack['installed_tools']) or '-'}")
+        self._reload_agents()
+
+    def _print_pack_preview(self, preview: dict[str, Any]) -> None:
+        self._emit(self._color(f"Pack: {preview['name']} v{preview['version']} ({preview['type']})", "bold"))
+        if preview.get("description"):
+            self._emit(f"  Aciklama: {preview['description']}")
+        self._emit(f"  Konum: {preview['path']}")
+        self._emit(f"  Ajanlar ({len(preview['agents'])}):")
+        for agent in preview["agents"]:
+            self._emit(f"    {agent['name']} | {agent['type']} | {len(agent.get('tools') or [])} tool")
+        self._emit(f"  Tool'lar ({len(preview['tools'])}):")
+        for tool in preview["tools"]:
+            state = "OK " if tool.get("export_ok") else "HATA"
+            self._emit(f"    [{state}] {tool['name']}")
+        for warning in preview["warnings"]:
+            self._emit(self._color(f"  Uyari: {warning}", "yellow"))
+        for error in preview["errors"]:
+            self._emit(self._color(f"  Hata: {error}", "red"))
+        self._emit(
+            self._color(
+                f"  Kurulabilir: {'evet' if preview['installable'] else 'hayir'}",
+                "green" if preview["installable"] else "red",
+            )
+        )
+
+    def _describe_agent(self, entry: dict[str, Any]) -> None:
+        self._emit(self._color(f"Ajan: {entry['name']}", "bold"))
+        self._emit(f"  Tip       : {entry.get('type') or 'config'}")
+        self._emit(f"  Durum     : {'aktif' if entry.get('enabled') else 'pasif'}")
+        self._emit(f"  Model     : {entry.get('model') or 'default'}")
+        self._emit(f"  Tool modu : {entry.get('tool_mode') or 'default'}")
+        if entry.get("description"):
+            self._emit(f"  Aciklama  : {entry['description']}")
+        tools = entry.get("tools") or []
+        if entry.get("tool_mode") == "custom":
+            self._emit(f"  Tool'lar  : {', '.join(tools) if tools else '(bos)'}")
+        else:
+            self._emit("  Tool'lar  : (varsayilan set)")
+        prompt = str(entry.get("system_prompt") or "").strip()
+        if prompt:
+            first_line = prompt.splitlines()[0]
+            suffix = "..." if len(prompt) > len(first_line) else ""
+            self._emit(f"  Prompt    : {first_line[:90]}{suffix} ({len(prompt)} karakter)")
+
+    @staticmethod
+    def _find_agent_entry(name: str) -> dict[str, Any] | None:
+        agents = _studio().load_agents_config()["agents"]
+        return next((item for item in agents if item["name"] == name), None)
+
+    def _warn_unknown_tools(self, tools: list[str]) -> None:
+        if not tools:
+            return
+        try:
+            known = set(_studio().load_available_tools(include_custom=True)["tools"].keys())
+        except Exception:
+            return
+        unknown = [tool for tool in tools if tool not in known]
+        if unknown:
+            self._emit(
+                self._color(
+                    f"Uyari: kayitli olmayan tool'lar yok sayilacak: {', '.join(unknown)}",
+                    "yellow",
+                )
+            )
+
+    async def _confirm(self, prompt: str) -> bool:
+        try:
+            answer = await self._read_line(prompt)
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return (answer or "").strip().lower() in _AFFIRMATIVE_ANSWERS
+
+    @staticmethod
+    def _split_name_list(value: Any) -> list[str]:
+        if not value:
+            return []
+        raw = str(value).replace(",", " ").split()
+        return list(dict.fromkeys(item.strip() for item in raw if item.strip()))
+
+    @staticmethod
+    def _parse_flags(args: list[str], *, bool_flags: set[str] | frozenset[str] = frozenset()) -> tuple[list[str], dict[str, Any]]:
+        positional: list[str] = []
+        flags: dict[str, Any] = {}
+        index = 0
+        while index < len(args):
+            token = args[index]
+            if token.startswith("--"):
+                key = token[2:].strip().lower().replace("-", "_")
+                if not key:
+                    raise ValueError(f"Gecersiz bayrak: {token}")
+                if key in bool_flags:
+                    flags[key] = True
+                    index += 1
+                    continue
+                if index + 1 >= len(args):
+                    raise ValueError(f"--{key} icin deger verilmedi.")
+                flags[key] = args[index + 1]
+                index += 2
+                continue
+            positional.append(token)
+            index += 1
+        return positional, flags
 
     def _all_tools(self) -> list[dict]:
         hierarchy = self.base_model.get_hierarchy()
