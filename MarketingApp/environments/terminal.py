@@ -388,9 +388,18 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         if "prompt" in flags:
             merged["system_prompt"] = flags["prompt"]
 
+        # --tools listeyi komple degistirir; digerleri mevcut listeyi baz alir. Varsayilan
+        # moddaki builtin ajanin bos listesi "hicbir tool" degil "kendi grubu" demektir,
+        # o yuzden ekleme/cikarma oncesi grubu somutlastir.
         if "tools" in flags:
             merged["tools"] = self._split_name_list(flags["tools"])
             tools_changed = True
+        elif any(
+            key in flags
+            for key in ("add_tools", "remove_tools", "tool_group", "tool_category", "remove_tool_group", "remove_tool_category")
+        ):
+            merged["tools"] = self._materialize_default_tools(merged)
+
         if "add_tools" in flags:
             additions = self._split_name_list(flags["add_tools"])
             merged["tools"] = list(dict.fromkeys(list(merged.get("tools") or []) + additions))
@@ -559,6 +568,29 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
     def _tool_taxonomy() -> list[dict[str, Any]]:
         """Tool kayit defteri: her tool icin ad, kategori ve ait oldugu gruplar."""
         return _studio().build_tool_registry()["tools"]
+
+    def _materialize_default_tools(self, entry: dict[str, Any]) -> list[str]:
+        """Varsayilan moddaki builtin ajanin ortuk tool setini acik listeye cevirir.
+
+        BaseModel builtin ajanlar icin bos listeyi 'ajan adiyla ayni gruba ait tum
+        tool'lar' diye yorumluyor. Ekleme/cikarma yapmadan once bunu somutlastirmazsak
+        tek tool eklemek ajanin butun varsayilan setini silmis olur.
+        """
+        tools = list(entry.get("tools") or [])
+        if tools or entry.get("type") != "builtin" or entry.get("tool_mode") == "custom":
+            return tools
+        try:
+            registry = self._tool_taxonomy()
+        except Exception:
+            return tools
+        defaults = sorted(
+            tool["name"] for tool in registry if entry["name"] in (tool.get("groups") or [])
+        )
+        if defaults:
+            self._emit(
+                f"'{entry['name']}' varsayilan setinden {len(defaults)} tool acik listeye alindi."
+            )
+        return defaults
 
     @staticmethod
     def _assert_known_taxonomy(registry: list[dict[str, Any]], groups, categories) -> None:
