@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import inspect
 import json
 import os
 import re
 import shlex
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -212,6 +214,8 @@ Komutlar
   /tool list                      Custom tool'lari listele
   /tool show <ad> [--code]        Custom tool detayini (ve kodunu) goster
   /tool create <ad> --file <yol>  Yeni custom tool ekle (--code ile satir ici)
+  /tool create --file <yol> --names a,b   Tek dosyadan birden fazla tool kaydet
+  /tool create --file <yol> --all         Dosyadaki tum fonksiyonlari tool yap
   /tool edit <ad> [bayrak]        Custom tool'u guncelle
   /tool delete <ad> [--yes]       Custom tool'u sil (--keep-file dosyayi birakir)
   /logs [adet]                    Son loglari goster (varsayilan 15)
@@ -252,6 +256,9 @@ Custom tool bayraklari
   --desc "..."              Model bu tool'u ne zaman cagiracagini buradan anlar
   --params "..."            Parametre notu (ornek JSON)
   --env A,B                 Gerekli env degiskenleri (.env.model dosyasina yazilir)
+  --names a,b               Tek dosyadan kaydedilecek fonksiyon adlari (toplu kayit)
+  --all                     Dosyadaki '_' ile baslamayan tum fonksiyonlari kaydet
+  --overwrite               Var olan tool kayitlarinin uzerine yaz (toplu kayit)
 
 NOT: config tipi ajanlar varsayilan tool setini almaz; tool vermezsen ajan
 tool'suz calisir. Varsayilan set fallback'i sadece builtin ajanlarda vardir.
@@ -263,6 +270,7 @@ Ornekler
   /agent copy sosyal_medya_agent test_sosyal
   /agent test rapor_ajani "Bu haftanin ozetini cikar"
   /tool create fiyat_getir --file ~/fiyat_getir.py --desc "Kripto fiyati doner"
+  /tool create --file ~/kripto.py --names fiyat_getir,hacim_getir
   /heartbeat add --cron "*/30" --gorev "Market snapshot al" --name "Market"
 
 Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
@@ -1034,13 +1042,25 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         return None
 
     def _upsert_custom_tool(self, args: list[str], *, create: bool) -> None:
-        positional, flags = self._parse_flags(args, bool_flags={"disabled", "enable", "disable"})
+        positional, flags = self._parse_flags(
+            args, bool_flags={"disabled", "enable", "disable", "all", "overwrite"}
+        )
         label = "create" if create else "edit"
+
+        # Toplu kayit: tek dosyadaki birden fazla fonksiyonu ayri tool olarak ekle.
+        if create and ("names" in flags or flags.get("all")):
+            if positional:
+                raise ValueError("Toplu kayitta tool adi verilmez; adlar --names ile ya da --all ile belirlenir.")
+            self._create_tools_from_file(flags)
+            return
+
         if len(positional) != 1:
             self._emit(
                 f'Kullanim: /tool {label} <ad> [--file <yol.py>] [--code "..."] [--desc "..."] '
                 '[--params "..."] [--env A,B]' + (" [--disabled]" if create else " [--enable|--disable]")
             )
+            if create:
+                self._emit('   Toplu: /tool create --file <yol.py> --names a,b   ya da   --all')
             return
 
         name = _studio().validate_tool_name(positional[0])
@@ -1098,6 +1118,113 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         if not description:
             self._emit(self._color("  Uyari: aciklama bos; model bu tool'u ne zaman cagiracagini bilemez.", "yellow"))
 
+        self._reload_agents()
+
+    @staticmethod
+    def _module_functions(code: str) -> list[tuple[str, str]]:
+        """Modulun ust seviye fonksiyonlarini (ad, docstring ilk satiri) olarak dondurur."""
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as exc:
+            raise ValueError(f"Kod derlenemedi (satir {exc.lineno}): {exc.msg}") from exc
+        functions = []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = (ast.get_docstring(node) or "").strip()
+                functions.append((node.name, doc.splitlines()[0] if doc else ""))
+        return functions
+
+    def _create_tools_from_file(self, flags: dict[str, Any]) -> None:
+        """Tek dosyadan birden fazla tool kaydeder.
+
+        Dosya kaynak adiyla bir kez kopyalanir ve her tool kaydi ayni dosyayi
+        gosterir; runtime tool'u modulden adiyla cekiyor (getattr), bu yuzden bir
+        modul birden fazla tool tasiyabilir. Agent pack kurulumu da ayni sekilde
+        calisir.
+        """
+        studio = _studio()
+        if "file" not in flags:
+            raise ValueError("Toplu kayit icin --file <yol.py> gerekli.")
+
+        source = Path(str(flags["file"])).expanduser()
+        if not source.is_file():
+            raise ValueError(f"Dosya bulunamadi: {source}")
+        if source.suffix != ".py":
+            raise ValueError("Tool dosyasi .py uzantili olmali.")
+
+        code = source.read_text(encoding="utf-8")
+        functions = self._module_functions(code)
+        available = {name for name, _ in functions}
+        docs = dict(functions)
+
+        if flags.get("all"):
+            names = [name for name, _ in functions if not name.startswith("_")]
+            if not names:
+                raise ValueError("Dosyada '_' ile baslamayan ust seviye fonksiyon yok.")
+        else:
+            names = [studio.validate_tool_name(item) for item in self._split_name_list(flags["names"])]
+            if not names:
+                raise ValueError("--names bos.")
+            missing = [name for name in names if name not in available]
+            if missing:
+                raise ValueError(
+                    f"Dosyada bulunmayan fonksiyon: {', '.join(missing)}. "
+                    f"Mevcut: {', '.join(sorted(available)) or '(yok)'}"
+                )
+
+        config = studio.load_custom_tools_config()
+        entries = list(config["custom_tools"])
+        by_name = {entry["name"]: entry for entry in entries}
+        builtin_names = {
+            item["name"] for item in studio.build_tool_registry()["tools"] if item.get("source") != "custom"
+        }
+
+        clashes = [name for name in names if name in by_name or name in builtin_names]
+        if clashes and not flags.get("overwrite"):
+            raise ValueError(f"Zaten kayitli tool: {', '.join(clashes)}. Uzerine yazmak icin --overwrite kullan.")
+
+        target = Path(studio.CUSTOM_TOOLS_DIR) / source.name
+        if target.exists() and target.resolve() != source.resolve() and not flags.get("overwrite"):
+            existing_users = [entry["name"] for entry in entries if entry.get("file") == source.name]
+            if existing_users:
+                raise ValueError(
+                    f"{source.name} zaten kullanimda ({', '.join(existing_users)}). --overwrite ile guncelle."
+                )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+
+        env_vars = self._parse_env_flag(flags.get("env"))
+        env_names = studio.update_model_env_vars(env_vars) or list(env_vars)
+        shared_desc = flags.get("desc") or flags.get("description") or ""
+        enabled = not flags.get("disabled")
+
+        for name in names:
+            entry = {
+                "name": name,
+                "enabled": enabled,
+                "description": docs.get(name) or shared_desc,
+                "file": target.name,
+                "params_note": flags.get("params") or flags.get("params_note") or "",
+                "env_vars": [item.upper() for item in env_names],
+            }
+            entries = [item for item in entries if item["name"] != name]
+            entries.append(entry)
+
+        studio.save_custom_tools_config(entries)
+        self._emit(self._color(f"{len(names)} tool kaydedildi: {', '.join(names)}", "green"))
+        self._emit(f"  Dosya: {target} (tek kopya, {len(names)} kayit paylasiyor)")
+
+        by_name = {entry["name"]: entry for entry in studio.load_custom_tools_config()["custom_tools"]}
+        for name in names:
+            func, error = studio.load_custom_tool_callable(by_name[name], include_disabled=True)
+            if error or func is None:
+                self._emit(self._color(f"  [HATA] {name}: {error or 'yuklenemedi'}", "red"))
+            else:
+                self._emit(self._color(f"  [OK  ] {name}: {by_name[name]['description'] or '(aciklama yok)'}", "green"))
+
+        skipped = sorted(available - set(names))
+        if skipped:
+            self._emit(f"  Kaydedilmeyen fonksiyonlar: {', '.join(skipped)}")
         self._reload_agents()
 
     def _show_custom_tool(self, args: list[str]) -> None:
