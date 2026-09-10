@@ -6,10 +6,12 @@ import asyncio
 import inspect
 import json
 import os
+import re
 import shlex
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from MarketingApp.environments.automation_runtime import (
@@ -18,12 +20,19 @@ from MarketingApp.environments.automation_runtime import (
     try_acquire_automation,
 )
 from MarketingApp.environments.heartbeat import (
+    HeartbeatConfigError,
+    add_task_to_content,
     get_heartbeat_jobs_snapshot,
     get_heartbeat_status_snapshot,
+    parse_config_content,
     pause_heartbeat_job,
+    read_config_content,
     reload_heartbeat_service,
+    remove_task_from_content,
     resume_heartbeat_job,
     run_heartbeat_job,
+    set_enabled_in_content,
+    write_config_content,
 )
 
 
@@ -132,6 +141,9 @@ class TerminalManager:
         self._emit("Mesaj yaz veya komutlari gormek icin /help kullan. Cikmak icin /exit.")
         if self.history:
             self._emit(f"Onceki terminal sohbetinden {len(self.history)} mesaj yuklendi.")
+        errors = self._studio_errors()
+        if errors:
+            self._emit(self._color(f"UYARI: {len(errors)} config hatasi var. /errors ile bak.", "yellow"))
         self._emit("")
 
     async def _handle_command(self, line: str) -> bool:
@@ -158,9 +170,11 @@ class TerminalManager:
         elif command == "/tools":
             self._print_tools(args)
         elif command == "/tool":
-            self._manage_tool(args)
+            await self._manage_tool(args)
         elif command == "/logs":
             self._print_logs(args)
+        elif command == "/errors":
+            self._print_errors(args)
         elif command == "/history":
             self._print_history()
         elif command == "/clear":
@@ -184,18 +198,31 @@ Komutlar
   /agent create <ad> [bayrak]     Yeni ajan olustur
   /agent edit <ad> [bayrak]       Var olan ajani duzenle
   /agent delete <ad> [--yes]      Config ajanini sil
+  /agent copy <kaynak> <hedef>    Ajani tool listesiyle birlikte klonla
+  /agent test <ad> "gorev"        Tek ajani dogrudan calistir
   /agent pack list                Kurulu agent pack'leri listele
   /agent pack preview <yol>       Pack'i kurmadan incele
   /agent pack install <yol>       Pack kur (--overwrite, --yes)
   /tools [arama]                  Tool'lari listele veya filtrele
   /tools --group <ad>             Bir gruba ait tool'lari listele
   /tools --category <ad>          Bir kategorideki tool'lari listele
-  /tools --list-groups            Mevcut grup ve kategorileri say
+  /tools --risk high              Riske gore filtrele (low|medium|high)
+  /tools --list-groups            Grup, kategori ve risk dagilimini say
   /tool <ad> on|off|toggle        Tool durumunu degistir
+  /tool list                      Custom tool'lari listele
+  /tool show <ad> [--code]        Custom tool detayini (ve kodunu) goster
+  /tool create <ad> --file <yol>  Yeni custom tool ekle (--code ile satir ici)
+  /tool edit <ad> [bayrak]        Custom tool'u guncelle
+  /tool delete <ad> [--yes]       Custom tool'u sil (--keep-file dosyayi birakir)
   /logs [adet]                    Son loglari goster (varsayilan 15)
+  /errors [arama]                 Config/runtime hatalarini goster
   /heartbeat                      Zamanlayici ve gorev durumunu goster
+  /heartbeat show <id>            Gorev detayini goster
+  /heartbeat add --cron X --gorev "..."   Yeni zamanli gorev ekle
+  /heartbeat remove <id> [--yes]  Zamanli gorevi sil
   /heartbeat run <id>             Bir heartbeat gorevini simdi calistir
   /heartbeat pause|resume <id>    Gorevi duraklat veya devam ettir
+  /heartbeat on|off               Heartbeat config'ini aktif/pasif yap
   /heartbeat reload               Config'i diskten yeniden yukle
   /reload                         Ajan ve custom tool config'ini yenile
   /history                        Terminal sohbet gecmisini goster
@@ -217,6 +244,14 @@ Ajan bayraklari
   --builtin                 SubModels altinda gercek .py dosyasi uret (sadece create)
   --disabled                Pasif olarak olustur (sadece create)
   --enable / --disable      Ajani aktif/pasif yap (sadece edit)
+  --dry-run                 Kaydetmeden sonucu goster
+
+Custom tool bayraklari
+  --file <yol.py>           Tool kodunu dosyadan al
+  --code "..."              Tool kodunu satir ici ver
+  --desc "..."              Model bu tool'u ne zaman cagiracagini buradan anlar
+  --params "..."            Parametre notu (ornek JSON)
+  --env A,B                 Gerekli env degiskenleri (.env.model dosyasina yazilir)
 
 NOT: config tipi ajanlar varsayilan tool setini almaz; tool vermezsen ajan
 tool'suz calisir. Varsayilan set fallback'i sadece builtin ajanlarda vardir.
@@ -224,8 +259,11 @@ tool'suz calisir. Varsayilan set fallback'i sadece builtin ajanlarda vardir.
 Ornekler
   /agent create rapor_ajani --tool-category workspace,memory \\
       --desc "Haftalik rapor derleyici" --prompt "Sen rapor derleyen bir ajansin."
-  /agent edit rapor_ajani --tool-group browser_agent
-  /agent edit rapor_ajani --remove-tool-category browser
+  /agent edit rapor_ajani --tool-group browser_agent --dry-run
+  /agent copy sosyal_medya_agent test_sosyal
+  /agent test rapor_ajani "Bu haftanin ozetini cikar"
+  /tool create fiyat_getir --file ~/fiyat_getir.py --desc "Kripto fiyati doner"
+  /heartbeat add --cron "*/30" --gorev "Market snapshot al" --name "Market"
 
 Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
 """.strip()
@@ -252,6 +290,47 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             )
         else:
             self._emit("  Otomasyon  : hazir")
+
+        errors = self._studio_errors()
+        if errors:
+            self._emit(
+                self._color(
+                    f"  Config     : {len(errors)} hata - detay icin /errors",
+                    "yellow",
+                )
+            )
+        else:
+            self._emit("  Config     : temiz")
+
+    def _studio_errors(self, name: str = "") -> list[dict[str, Any]]:
+        """BaseModel'in topladigi agent studio hatalari; istege bagli olarak tek ajana filtreli.
+
+        Bu liste runtime'da doluyor ama hicbir yerde gosterilmiyordu: bilinmeyen tool,
+        registry'de bulunamayan submodel, bozuk YAML girdisi hep sessizce yutuluyordu.
+        """
+        errors = list(getattr(self.base_model, "agent_studio_errors", []) or [])
+        if not name:
+            return errors
+        return [item for item in errors if item.get("name") == name]
+
+    def _print_errors(self, args: list[str]) -> None:
+        errors = self._studio_errors()
+        needle = " ".join(args).strip().lower()
+        if needle:
+            errors = [item for item in errors if needle in json.dumps(item, ensure_ascii=False).lower()]
+
+        self._emit(self._color(f"Config hatalari ({len(errors)})", "bold"))
+        if not errors:
+            self._emit(self._color("  Hata yok.", "green"))
+            return
+        for item in errors:
+            scope = item.get("scope") or "genel"
+            target = item.get("name") or ""
+            header = f"  [{scope}]" + (f" {target}" if target else "")
+            self._emit(self._color(header, "yellow"))
+            self._emit(f"      {item.get('message') or '-'}")
+            if item.get("entry"):
+                self._emit(f"      girdi: {json.dumps(item['entry'], ensure_ascii=False)[:200]}")
 
     def _print_agents(self) -> None:
         agents = self.base_model.get_hierarchy().get("submodels", [])
@@ -287,6 +366,10 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
                 self._edit_agent(rest)
             elif action == "delete":
                 await self._delete_agent(rest)
+            elif action == "copy":
+                self._copy_agent(rest)
+            elif action == "test":
+                await self._test_agent(rest)
             elif action == "pack":
                 await self._manage_agent_pack(rest)
             else:
@@ -322,7 +405,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         self._describe_agent(entry)
 
     def _create_agent(self, args: list[str]) -> None:
-        positional, flags = self._parse_flags(args, bool_flags={"builtin", "disabled"})
+        positional, flags = self._parse_flags(args, bool_flags={"builtin", "disabled", "dry_run"})
         if len(positional) != 1:
             self._emit('Kullanim: /agent create <ad> [--model M] [--tools a,b] [--tool-group g1,g2] [--tool-category c1,c2] [--prompt "..."] [--desc "..."] [--tool-mode default|custom] [--builtin] [--disabled]')
             return
@@ -354,6 +437,11 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
                 )
             )
 
+        if flags.get("dry_run"):
+            self._emit(self._color("[dry-run] Kaydedilmedi. Olusacak ajan:", "yellow"))
+            self._describe_agent(entry)
+            return
+
         if flags.get("builtin"):
             result = _studio().create_builtin_agent_scaffold(entry)
             saved = result["agent"]
@@ -367,7 +455,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         self._reload_agents()
 
     def _edit_agent(self, args: list[str]) -> None:
-        positional, flags = self._parse_flags(args, bool_flags={"enable", "disable"})
+        positional, flags = self._parse_flags(args, bool_flags={"enable", "disable", "dry_run"})
         if len(positional) != 1 or not flags:
             self._emit('Kullanim: /agent edit <ad> [--model M] [--tools a,b] [--add-tools a,b] [--remove-tools a,b] [--tool-group g1,g2] [--remove-tool-group g1] [--tool-category c1] [--remove-tool-category c1] [--tool-mode default|custom] [--prompt "..."] [--desc "..."] [--enable|--disable]')
             return
@@ -435,10 +523,82 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         if flags.get("disable"):
             merged["enabled"] = False
 
+        if flags.get("dry_run"):
+            before = len(current.get("tools") or [])
+            after = len(merged.get("tools") or [])
+            self._emit(self._color(f"[dry-run] Kaydedilmedi. Tool sayisi {before} -> {after}. Sonuc:", "yellow"))
+            self._describe_agent(merged)
+            return
+
         saved = _studio().upsert_agent_config(merged, create=False)
         self._emit(self._color(f"Ajan guncellendi: {saved['name']}", "green"))
         self._describe_agent(saved)
         self._reload_agents()
+
+    def _copy_agent(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"disabled"})
+        if len(positional) != 2:
+            self._emit('Kullanim: /agent copy <kaynak> <hedef> [--model M] [--desc "..."] [--disabled]')
+            return
+
+        source_name = _studio().validate_agent_name(positional[0])
+        target_name = _studio().validate_agent_name(positional[1])
+        source = self._find_agent_entry(source_name)
+        if source is None:
+            self._emit(self._color(f"Kaynak ajan bulunamadi: {source_name}", "red"))
+            return
+        if self._find_agent_entry(target_name) is not None:
+            raise ValueError(f"'{target_name}' zaten var.")
+
+        # Builtin kaynagin ortuk grubu klona tasinmaz; kopya her zaman config tipi olur.
+        entry = {
+            "name": target_name,
+            "type": "config",
+            "enabled": not flags.get("disabled"),
+            "description": flags.get("desc") or flags.get("description") or source.get("description") or "",
+            "model": flags.get("model") or source.get("model") or "default",
+            "tool_mode": "custom",
+            "system_prompt": source.get("system_prompt") or "",
+            "tools": self._materialize_default_tools(source),
+        }
+        saved = _studio().upsert_agent_config(entry, create=True)
+        self._emit(self._color(f"'{source_name}' -> '{target_name}' olarak kopyalandi.", "green"))
+        self._describe_agent(saved)
+        self._reload_agents()
+
+    async def _test_agent(self, args: list[str]) -> None:
+        positional, _ = self._parse_flags(args)
+        if len(positional) != 2:
+            self._emit('Kullanim: /agent test <ad> "gorev metni"')
+            return
+
+        name, gorev = positional[0], positional[1]
+        runner = getattr(self.base_model, "_submodel_func_map", {}).get(name)
+        if runner is None:
+            self._emit(self._color(f"Calisan ajan bulunamadi: {name}. /agents ile aktif olanlara bak.", "red"))
+            return
+
+        job_id = f"terminal-agent-test-{time.time_ns()}"
+        acquired, snapshot = await try_acquire_automation(
+            "terminal", job_id=job_id, label=f"Ajan testi: {name}", source="terminal"
+        )
+        if not acquired:
+            owner = snapshot.get("owner") or "otomasyon"
+            self._emit(self._color(f"Sistem mesgul: {owner} / {snapshot.get('label') or '-'}", "yellow"))
+            return
+
+        self._emit(self._color(f"{name} calistiriliyor...", "yellow"))
+        started = time.monotonic()
+        try:
+            answer = await runner(gorev)
+        except Exception as exc:
+            self._emit(self._color(f"Ajan hatasi: {exc}", "red"))
+            return
+        finally:
+            await release_automation("terminal", job_id=job_id)
+
+        self._emit(self._color(f"{name}> ({time.monotonic() - started:.1f}sn)", "green"))
+        self._emit(str(answer))
 
     async def _delete_agent(self, args: list[str]) -> None:
         positional, flags = self._parse_flags(args, bool_flags={"yes"})
@@ -558,6 +718,8 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             first_line = prompt.splitlines()[0]
             suffix = "..." if len(prompt) > len(first_line) else ""
             self._emit(f"  Prompt    : {first_line[:90]}{suffix} ({len(prompt)} karakter)")
+        for error in self._studio_errors(entry["name"]):
+            self._emit(self._color(f"  Hata      : {error.get('message')}", "yellow"))
 
     @staticmethod
     def _find_agent_entry(name: str) -> dict[str, Any] | None:
@@ -706,9 +868,13 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         needle = " ".join(positional).strip().lower()
         wanted_groups = set(self._split_name_list(flags.get("group")))
         wanted_categories = set(self._split_name_list(flags.get("category")))
+        wanted_risks = set(self._split_name_list(flags.get("risk")))
+        if wanted_risks - {"low", "medium", "high"}:
+            self._emit(self._color("--risk sadece low, medium veya high olabilir.", "red"))
+            return
 
         taxonomy: dict[str, dict[str, Any]] = {}
-        if wanted_groups or wanted_categories:
+        if wanted_groups or wanted_categories or wanted_risks:
             try:
                 registry = self._tool_taxonomy()
                 self._assert_known_taxonomy(registry, wanted_groups, wanted_categories)
@@ -725,13 +891,15 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             name = tool.get("name", "")
             if needle and needle not in name.lower() and needle not in tool.get("desc", "").lower():
                 continue
-            if wanted_groups or wanted_categories:
+            if taxonomy:
                 meta = taxonomy.get(name)
                 if not meta:
                     continue
                 if wanted_groups and not (wanted_groups & set(meta.get("groups") or [])):
                     continue
                 if wanted_categories and meta.get("category") not in wanted_categories:
+                    continue
+                if wanted_risks and meta.get("risk") not in wanted_risks:
                     continue
             tools.append(tool)
 
@@ -741,7 +909,9 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             return
         for tool in tools:
             state = "ON " if tool.get("active", True) else "OFF"
-            self._emit(f"  [{state}] {tool.get('name')}")
+            meta = taxonomy.get(tool.get("name", ""))
+            suffix = f" | {meta['category']} | risk={meta['risk']}" if meta else ""
+            self._emit(f"  [{state}] {tool.get('name')}{suffix}")
 
     def _print_tool_taxonomy(self) -> None:
         try:
@@ -763,14 +933,50 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         self._emit(self._color(f"Tool kategorileri ({len(category_counts)})", "bold"))
         for name, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0])):
             self._emit(f"  {name:24} {count} tool")
+        risk_counts: dict[str, int] = {}
+        for tool in registry:
+            risk_counts[tool["risk"]] = risk_counts.get(tool["risk"], 0) + 1
+        self._emit(self._color("Risk dagilimi", "bold"))
+        for level in ("high", "medium", "low"):
+            if level in risk_counts:
+                self._emit(f"  {level:24} {risk_counts[level]} tool")
         self._emit(f"Toplam {len(registry)} tool.")
-        self._emit("Kullanim: /tools --group <ad>  |  /tools --category <ad>")
+        self._emit("Kullanim: /tools --group <ad> | --category <ad> | --risk high")
 
-    def _manage_tool(self, args: list[str]) -> None:
-        if len(args) != 2:
-            self._emit("Kullanim: /tool <ad> on|off|toggle")
+    async def _manage_tool(self, args: list[str]) -> None:
+        if not args:
+            self._emit("Kullanim: /tool <ad> on|off|toggle  ya da  /tool create|edit|show|delete ...")
             return
-        name, action = args[0], args[1].lower()
+
+        # Eski kullanim once: /tool <ad> on|off|toggle
+        if len(args) == 2 and args[1].lower() in _AGENT_SWITCH_WORDS:
+            self._toggle_tool(args[0], args[1].lower())
+            return
+
+        action = args[0].lower()
+        rest = args[1:]
+        studio = _studio()
+        try:
+            if action == "create":
+                self._upsert_custom_tool(rest, create=True)
+            elif action == "edit":
+                self._upsert_custom_tool(rest, create=False)
+            elif action == "show":
+                self._show_custom_tool(rest)
+            elif action == "list":
+                self._print_custom_tools()
+            elif action == "delete":
+                await self._delete_custom_tool(rest)
+            else:
+                self._emit("Kullanim: /tool <ad> on|off|toggle  ya da  /tool create|edit|show|list|delete ...")
+        except studio.AgentStudioError as exc:
+            self._emit(self._color(f"Agent Studio hatasi: {exc}", "red"))
+        except ValueError as exc:
+            self._emit(self._color(str(exc), "red"))
+        except Exception as exc:
+            self._emit(self._color(f"Tool islemi basarisiz: {exc}", "red"))
+
+    def _toggle_tool(self, name: str, action: str) -> None:
         current = getattr(self.base_model, "active_tools", {}).get(name)
         if current is None:
             self._emit(self._color(f"Tool bulunamadi: {name}", "red"))
@@ -781,6 +987,190 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             self._emit(self._color(f"{name}: {'aktif' if active else 'pasif'}", "green"))
         except ValueError as exc:
             self._emit(str(exc))
+
+    @staticmethod
+    def _find_custom_tool(name: str) -> dict[str, Any] | None:
+        entries = _studio().load_custom_tools_config()["custom_tools"]
+        return next((item for item in entries if item["name"] == name), None)
+
+    def _print_custom_tools(self) -> None:
+        entries = _studio().load_custom_tools_config()["custom_tools"]
+        self._emit(self._color(f"Custom tool'lar ({len(entries)})", "bold"))
+        if not entries:
+            self._emit("  Kayitli custom tool yok.")
+            return
+        for entry in entries:
+            state = "ON " if entry.get("enabled") else "OFF"
+            self._emit(f"  [{state}] {entry['name']} | {entry.get('file') or '-'}")
+            if entry.get("description"):
+                self._emit(f"        {entry['description']}")
+
+    def _parse_env_flag(self, value: Any) -> dict[str, str]:
+        """--env AD,BASKA_AD=deger -> {AD: '', BASKA_AD: 'deger'}.
+
+        Degeri verilen degiskenler .env.model dosyasina yazilir; degersiz olanlar
+        sadece tool'un gereksinim listesine kaydedilir.
+        """
+        result: dict[str, str] = {}
+        for item in self._split_name_list(value):
+            key, _, raw_value = item.partition("=")
+            key = key.strip().upper()
+            if not key:
+                continue
+            result[key] = raw_value.strip()
+        return result
+
+    def _read_tool_code(self, flags: dict[str, Any]) -> str | None:
+        """--file veya --code bayragindan tool kaynak kodunu okur."""
+        if "code" in flags:
+            return str(flags["code"])
+        if "file" in flags:
+            path = Path(str(flags["file"])).expanduser()
+            if not path.is_file():
+                raise ValueError(f"Dosya bulunamadi: {path}")
+            if path.suffix != ".py":
+                raise ValueError("Tool dosyasi .py uzantili olmali.")
+            return path.read_text(encoding="utf-8")
+        return None
+
+    def _upsert_custom_tool(self, args: list[str], *, create: bool) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"disabled", "enable", "disable"})
+        label = "create" if create else "edit"
+        if len(positional) != 1:
+            self._emit(
+                f'Kullanim: /tool {label} <ad> [--file <yol.py>] [--code "..."] [--desc "..."] '
+                '[--params "..."] [--env A,B]' + (" [--disabled]" if create else " [--enable|--disable]")
+            )
+            return
+
+        name = _studio().validate_tool_name(positional[0])
+        existing = self._find_custom_tool(name)
+        if create and existing:
+            raise ValueError(f"'{name}' zaten kayitli. Guncellemek icin /tool edit kullan.")
+        if not create and not existing:
+            raise ValueError(f"'{name}' bulunamadi. Olusturmak icin /tool create kullan.")
+
+        code = self._read_tool_code(flags)
+        if create and code is None:
+            raise ValueError("Yeni tool icin --file <yol.py> ya da --code \"...\" vermelisin.")
+        if code is None:
+            code = _studio().read_custom_tool_code(existing)
+
+        # Kaydetmeden once derle: bozuk kod runtime'a girmesin.
+        try:
+            compile(code, f"<custom_tool:{name}>", "exec")
+        except SyntaxError as exc:
+            raise ValueError(f"Kod derlenemedi (satir {exc.lineno}): {exc.msg}") from exc
+        if not re.search(rf"(?m)^\s*(?:async\s+)?def\s+{re.escape(name)}\s*\(", code):
+            raise ValueError(f"Kod icinde '{name}' adinda bir fonksiyon tanimi bulunamadi.")
+
+        base = existing or {}
+        description = flags.get("desc") or flags.get("description") or base.get("description") or ""
+        params_note = flags.get("params") or flags.get("params_note") or base.get("params_note") or ""
+        env_vars = self._parse_env_flag(flags.get("env")) or {
+            name: "" for name in base.get("env_vars") or []
+        }
+        enabled = bool(base.get("enabled", True))
+        if flags.get("disabled") or flags.get("disable"):
+            enabled = False
+        if flags.get("enable"):
+            enabled = True
+
+        saved = _studio().upsert_custom_tool(
+            name,
+            description,
+            code,
+            enabled=enabled,
+            params_note=params_note,
+            env_vars=env_vars,
+        )
+        self._emit(self._color(f"Custom tool {'olusturuldu' if create else 'guncellendi'}: {name}", "green"))
+        self._emit(f"  Dosya: {saved['path']}")
+
+        # Import edilebiliyor mu? Kayit sonrasi gercek yukleme denemesi.
+        func, error = _studio().load_custom_tool_callable(saved, include_disabled=True)
+        if error or func is None:
+            self._emit(self._color(f"  Uyari: tool yuklenemedi -> {error or 'bilinmeyen hata'}", "yellow"))
+        else:
+            self._emit(self._color("  Yukleme testi: basarili", "green"))
+        if saved.get("env_vars"):
+            self._emit(f"  Env: {', '.join(saved['env_vars'])} (.env.model dosyasina eklendi)")
+        if not description:
+            self._emit(self._color("  Uyari: aciklama bos; model bu tool'u ne zaman cagiracagini bilemez.", "yellow"))
+
+        self._reload_agents()
+
+    def _show_custom_tool(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"code"})
+        if len(positional) != 1:
+            self._emit("Kullanim: /tool show <ad> [--code]")
+            return
+        name = _studio().validate_tool_name(positional[0])
+        entry = self._find_custom_tool(name)
+        if entry is None:
+            self._emit(self._color(f"Custom tool bulunamadi: {name}", "red"))
+            return
+
+        self._emit(self._color(f"Custom tool: {entry['name']}", "bold"))
+        self._emit(f"  Durum     : {'aktif' if entry.get('enabled') else 'pasif'}")
+        self._emit(f"  Dosya     : {entry.get('file') or '-'}")
+        self._emit(f"  Aciklama  : {entry.get('description') or '-'}")
+        if entry.get("params_note"):
+            self._emit(f"  Parametre : {entry['params_note']}")
+        if entry.get("env_vars"):
+            self._emit(f"  Env       : {', '.join(entry['env_vars'])}")
+
+        func, error = _studio().load_custom_tool_callable(entry, include_disabled=True)
+        if error or func is None:
+            self._emit(self._color(f"  Yukleme   : HATA -> {error or 'bilinmeyen'}", "red"))
+        else:
+            self._emit(self._color("  Yukleme   : basarili", "green"))
+
+        if flags.get("code"):
+            code = _studio().read_custom_tool_code(entry)
+            self._emit(self._color("--- kod ---", "bold"))
+            for line_no, line in enumerate(code.splitlines(), start=1):
+                self._emit(f"  {line_no:3} | {line}")
+
+    async def _delete_custom_tool(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"yes", "keep_file"})
+        if len(positional) != 1:
+            self._emit("Kullanim: /tool delete <ad> [--yes] [--keep-file]")
+            return
+        name = _studio().validate_tool_name(positional[0])
+        entry = self._find_custom_tool(name)
+        if entry is None:
+            self._emit(self._color(f"Custom tool bulunamadi: {name}", "red"))
+            return
+
+        users = [
+            agent["name"]
+            for agent in _studio().load_agents_config()["agents"]
+            if name in (agent.get("tools") or [])
+        ]
+        if users:
+            self._emit(self._color(f"Uyari: bu tool su ajanlarda kayitli: {', '.join(users)}", "yellow"))
+
+        if not flags.get("yes") and not await self._confirm(f"  {name} silinecek. Onayliyor musun? [e/H]: "):
+            self._emit("Silme iptal edildi.")
+            return
+
+        studio = _studio()
+        entries = [item for item in studio.load_custom_tools_config()["custom_tools"] if item["name"] != name]
+        studio.save_custom_tools_config(entries)
+
+        if not flags.get("keep_file"):
+            path = Path(studio.CUSTOM_TOOLS_DIR) / (entry.get("file") or f"{name}.py")
+            try:
+                path.unlink()
+                self._emit(f"  Dosya silindi: {path}")
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                self._emit(self._color(f"  Dosya silinemedi: {exc}", "yellow"))
+
+        self._emit(self._color(f"Custom tool silindi: {name}", "green"))
+        self._reload_agents()
 
     def _print_logs(self, args: list[str]) -> None:
         try:
@@ -834,6 +1224,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             return
 
         action = args[0].lower()
+        rest = args[1:]
         try:
             if action == "reload" and len(args) == 1:
                 result = await reload_heartbeat_service(reason="terminal_reload")
@@ -845,12 +1236,110 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
                     "resume": resume_heartbeat_job,
                 }
                 result = await operations[action](job_id)
+            elif action == "show" and len(rest) == 1:
+                self._show_heartbeat_task(rest[0])
+                return
+            elif action == "add":
+                await self._add_heartbeat_task(rest)
+                return
+            elif action == "remove":
+                await self._remove_heartbeat_task(rest)
+                return
+            elif action in {"on", "off"} and not rest:
+                await self._set_heartbeat_enabled(action == "on")
+                return
             else:
-                self._emit("Kullanim: /heartbeat [reload|run <id>|pause <id>|resume <id>]")
+                self._emit(
+                    "Kullanim: /heartbeat [reload|run <id>|pause <id>|resume <id>|show <id>|"
+                    'add --cron X --gorev "..."|remove <id>|on|off]'
+                )
                 return
             self._emit(self._color(f"Heartbeat islemi tamamlandi: {result}", "green"))
+        except HeartbeatConfigError as exc:
+            self._emit(self._color(f"Heartbeat config hatasi: {exc}", "red"))
+        except ValueError as exc:
+            self._emit(self._color(str(exc), "red"))
         except Exception as exc:
             self._emit(self._color(f"Heartbeat hatasi: {exc}", "red"))
+
+    def _show_heartbeat_task(self, task_id: str) -> None:
+        tasks = parse_config_content(read_config_content())["tasks"]
+        task = next((item for item in tasks if item.task_id == task_id), None)
+        if task is None:
+            self._emit(self._color(f"Heartbeat gorevi bulunamadi: {task_id}", "red"))
+            return
+        self._emit(self._color(f"Heartbeat gorevi: {task.task_id}", "bold"))
+        self._emit(f"  Ad     : {task.name}")
+        self._emit(f"  Cron   : {task.cron}")
+        self._emit(f"  Durum  : {'aktif' if task.enabled else 'pasif'}")
+        self._emit("  Gorev  :")
+        for line in task.gorev.splitlines():
+            self._emit(f"    {line}")
+
+    async def _add_heartbeat_task(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"disabled", "dry_run"})
+        if positional or "cron" not in flags or "gorev" not in flags:
+            self._emit(
+                'Kullanim: /heartbeat add --cron <startup|*/N|HH:MM> --gorev "..." '
+                '[--id <id>] [--name "..."] [--disabled] [--dry-run]'
+            )
+            return
+
+        content = read_config_content()
+        updated, task_id = add_task_to_content(
+            content,
+            gorev=str(flags["gorev"]),
+            cron=str(flags["cron"]),
+            task_id=str(flags.get("id") or ""),
+            name=str(flags.get("name") or ""),
+            enabled=not flags.get("disabled"),
+        )
+
+        if flags.get("dry_run"):
+            self._emit(self._color(f"[dry-run] Eklenecek gorev: {task_id}", "yellow"))
+            self._emit("\n".join(f"  {line}" for line in updated.splitlines()[-8:]))
+            return
+
+        write_config_content(updated)
+        self._emit(self._color(f"Heartbeat gorevi eklendi: {task_id}", "green"))
+        await self._refresh_heartbeat("terminal_task_add")
+
+    async def _remove_heartbeat_task(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"yes"})
+        if len(positional) != 1:
+            self._emit("Kullanim: /heartbeat remove <id> [--yes]")
+            return
+
+        task_id = positional[0]
+        content = read_config_content()
+        updated = remove_task_from_content(content, task_id)
+
+        if not flags.get("yes") and not await self._confirm(f"  {task_id} gorevi silinecek. Onayliyor musun? [e/H]: "):
+            self._emit("Silme iptal edildi.")
+            return
+
+        write_config_content(updated)
+        self._emit(self._color(f"Heartbeat gorevi silindi: {task_id}", "green"))
+        await self._refresh_heartbeat("terminal_task_remove")
+
+    async def _refresh_heartbeat(self, reason: str) -> None:
+        """Config yazildiktan sonra zamanlayiciyi tazeler.
+
+        Servis henuz ayakta degilse bu bir hata degil: config diske yazildi ve
+        heartbeat baslarken okunacak.
+        """
+        try:
+            result = await reload_heartbeat_service(reason=reason)
+        except Exception as exc:
+            self._emit(self._color(f"  Config kaydedildi; zamanlayici tazelenemedi ({exc}).", "yellow"))
+            return
+        self._emit(f"  Zamanlayici yenilendi: {result}")
+
+    async def _set_heartbeat_enabled(self, enabled: bool) -> None:
+        updated = set_enabled_in_content(read_config_content(), enabled)
+        write_config_content(updated)
+        self._emit(self._color(f"Heartbeat config: {'aktif' if enabled else 'pasif'}", "green"))
+        await self._refresh_heartbeat("terminal_toggle")
 
     async def _chat(self, user_text: str) -> None:
         job_id = f"terminal-chat-{time.time_ns()}"
