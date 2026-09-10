@@ -1225,6 +1225,211 @@ def install_agent_pack(path_value: str, *, overwrite: bool = False) -> dict[str,
     }
 
 
+def _pack_readme_template(pack_name: str, description: str, agents: list[str], tools: list[str], env_names: list[str]) -> str:
+    lines = [
+        f"# {pack_name}",
+        "",
+        description or "Agent Studio ile disari aktarilmis paket.",
+        "",
+        "## Kurulum",
+        "",
+        "```",
+        f"/agent pack preview <bu-klasorun-yolu>",
+        f"/agent pack install <bu-klasorun-yolu>",
+        "```",
+        "",
+    ]
+    if agents:
+        lines += ["## Ajanlar", ""] + [f"- `{item}`" for item in agents] + [""]
+    if tools:
+        lines += ["## Tool'lar", ""] + [f"- `{item}`" for item in tools] + [""]
+    if env_names:
+        lines += [
+            "## Gerekli env degiskenleri",
+            "",
+            "`env.example` dosyasindaki degiskenleri kendi `.env` dosyana kopyalayip doldur.",
+            "",
+        ] + [f"- `{item}`" for item in env_names] + [""]
+    return "\n".join(lines)
+
+
+def export_agent_pack(
+    name: str,
+    *,
+    out_dir: str = "",
+    agents: list[str] | None = None,
+    tools: list[str] | None = None,
+    include_all: bool = False,
+    version: str = "0.1.0",
+    description: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Mevcut kurulumdan kurulabilir bir agent pack uretir (install_agent_pack'in tersi).
+
+    Sadece config tipi ajanlar ve custom tool'lar paketlenebilir: builtin ajanlar
+    kod icinde yasar, builtin tool'lar zaten hedef kurulumda vardir. Env
+    degerleri ASLA pakete yazilmaz; sadece degisken adlari env.example'a girer.
+    """
+    ensure_agent_studio_files()
+    pack_name = validate_pack_name(name)
+    warnings: list[str] = []
+
+    agent_entries = {item["name"]: item for item in load_agents_config()["agents"]}
+    custom_entries = {item["name"]: item for item in load_custom_tools_config()["custom_tools"]}
+
+    # --- ajan secimi ---
+    if include_all and not agents:
+        selected_agents = [item for item in agent_entries.values() if item.get("type") == "config"]
+        skipped_builtin = [item["name"] for item in agent_entries.values() if item.get("type") != "config"]
+        if skipped_builtin:
+            warnings.append(f"Builtin ajanlar paketlenemez, atlandi: {', '.join(sorted(skipped_builtin))}")
+    else:
+        selected_agents = []
+        for agent_name in agents or []:
+            entry = agent_entries.get(validate_agent_name(agent_name))
+            if entry is None:
+                raise AgentStudioError(f"Ajan bulunamadi: {agent_name}")
+            if entry.get("type") != "config":
+                raise AgentStudioError(
+                    f"'{agent_name}' builtin tipinde ve paketlenemez. Once '/agent copy {agent_name} <yeni_ad>' "
+                    "ile config kopyasini olustur, sonra onu paketle."
+                )
+            selected_agents.append(entry)
+
+    # --- tool secimi ---
+    if tools:
+        selected_tools = []
+        for tool_name in tools:
+            normalized = validate_tool_name(tool_name)
+            entry = custom_entries.get(normalized)
+            if entry is None:
+                if normalized in load_available_tools(include_custom=False)["tools"]:
+                    raise AgentStudioError(
+                        f"'{normalized}' hazir bir builtin tool; pakete girmez, hedef kurulumda zaten var."
+                    )
+                raise AgentStudioError(f"Custom tool bulunamadi: {normalized}")
+            selected_tools.append(entry)
+    elif include_all:
+        selected_tools = list(custom_entries.values())
+    else:
+        referenced = {tool for item in selected_agents for tool in item.get("tools") or []}
+        selected_tools = [custom_entries[item] for item in sorted(referenced & set(custom_entries))]
+
+    if not selected_agents and not selected_tools:
+        raise AgentStudioError("Pakete girecek ajan veya custom tool secilmedi.")
+
+    exported_tool_names = {item["name"] for item in selected_tools}
+    for agent in selected_agents:
+        missing = [
+            tool
+            for tool in agent.get("tools") or []
+            if tool in custom_entries and tool not in exported_tool_names
+        ]
+        if missing:
+            warnings.append(
+                f"{agent['name']} su custom tool'lara bagli ama pakete alinmadi: {', '.join(missing)}"
+            )
+
+    # --- hedef klasor ---
+    root = Path(out_dir).expanduser() if out_dir else (WORKSPACE_DIR / "exports" / pack_name)
+    root = root.resolve()
+    if root.exists():
+        if not overwrite:
+            raise AgentStudioError(f"{root} zaten var; uzerine yazmak icin overwrite kullan.")
+        if not root.is_dir():
+            raise AgentStudioError(f"{root} bir klasor degil.")
+        shutil.rmtree(root)
+    root.mkdir(parents=True)
+
+    # --- tool dosyalari (birden fazla tool ayni dosyayi paylasabilir) ---
+    manifest_tools = []
+    copied_files: set[str] = set()
+    if selected_tools:
+        (root / "tools").mkdir()
+    for entry in selected_tools:
+        file_name = entry.get("file") or f"{entry['name']}.py"
+        source = _custom_tool_path(file_name)
+        if not source.exists():
+            raise AgentStudioError(f"{entry['name']} icin kaynak dosya bulunamadi: {source}")
+        if file_name not in copied_files:
+            shutil.copy2(source, root / "tools" / file_name)
+            copied_files.add(file_name)
+        manifest_tools.append(
+            {
+                "name": entry["name"],
+                "file": f"tools/{file_name}",
+                "description": entry.get("description") or "",
+                "params_note": entry.get("params_note") or "",
+                "env_vars": list(entry.get("env_vars") or []),
+            }
+        )
+
+    # --- ajan manifestleri ve promptlar ---
+    manifest_agents = []
+    if selected_agents:
+        (root / "agents").mkdir()
+    for agent in selected_agents:
+        payload = {
+            "name": agent["name"],
+            "type": "config",
+            "enabled": bool(agent.get("enabled", True)),
+            "description": agent.get("description") or "",
+            "model": agent.get("model") or "default",
+            "tool_mode": agent.get("tool_mode") or "custom",
+            "tools": list(agent.get("tools") or []),
+        }
+        prompt = str(agent.get("system_prompt") or "").strip()
+        if prompt:
+            (root / "prompts").mkdir(exist_ok=True)
+            (root / "prompts" / f"{agent['name']}.md").write_text(prompt, encoding="utf-8")
+            payload["system_prompt_file"] = f"prompts/{agent['name']}.md"
+        relative = f"agents/{agent['name']}.yaml"
+        _write_yaml(root / relative, payload)
+        manifest_agents.append(relative)
+
+    # --- env.example: sadece adlar, deger yok ---
+    env_names = sorted({item for entry in selected_tools for item in entry.get("env_vars") or []})
+    if env_names:
+        (root / "env.example").write_text(
+            "\n".join(f"{item}=" for item in env_names) + "\n", encoding="utf-8"
+        )
+
+    manifest: dict[str, Any] = {
+        "name": pack_name,
+        "version": str(version or "0.1.0"),
+        "type": "agent_bundle" if manifest_agents else "tool_pack",
+        "description": description or f"{pack_name} paketi.",
+    }
+    if manifest_tools:
+        manifest["tools"] = manifest_tools
+    if manifest_agents:
+        manifest["agents"] = manifest_agents
+    _write_yaml(root / "plugin.yaml", manifest)
+
+    (root / "README.md").write_text(
+        _pack_readme_template(
+            pack_name,
+            manifest["description"],
+            [item["name"] for item in selected_agents],
+            [item["name"] for item in selected_tools],
+            env_names,
+        ),
+        encoding="utf-8",
+    )
+
+    return {
+        "name": pack_name,
+        "version": manifest["version"],
+        "type": manifest["type"],
+        "path": str(root),
+        "agents": [item["name"] for item in selected_agents],
+        "tools": [item["name"] for item in selected_tools],
+        "files": sorted(str(path.relative_to(root)) for path in root.rglob("*") if path.is_file()),
+        "env_vars": env_names,
+        "warnings": warnings,
+    }
+
+
 def _tool_description(func: Callable) -> str:
     doc = (getattr(func, "__doc__", "") or "").strip().splitlines()
     return doc[0].strip() if doc else ""

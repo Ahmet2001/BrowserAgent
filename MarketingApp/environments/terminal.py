@@ -205,6 +205,7 @@ Komutlar
   /agent pack list                Kurulu agent pack'leri listele
   /agent pack preview <yol>       Pack'i kurmadan incele
   /agent pack install <yol>       Pack kur (--overwrite, --yes)
+  /agent pack export <ad>         Kurulumunu paylasilabilir pakete cikar
   /tools [arama]                  Tool'lari listele veya filtrele
   /tools --group <ad>             Bir gruba ait tool'lari listele
   /tools --category <ad>          Bir kategorideki tool'lari listele
@@ -271,6 +272,7 @@ Ornekler
   /agent test rapor_ajani "Bu haftanin ozetini cikar"
   /tool create fiyat_getir --file ~/fiyat_getir.py --desc "Kripto fiyati doner"
   /tool create --file ~/kripto.py --names fiyat_getir,hacim_getir
+  /agent pack export kripto_paketim --agents kripto_ajani --out ~/paketim
   /heartbeat add --cron "*/30" --gorev "Market snapshot al" --name "Market"
 
 Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
@@ -652,8 +654,15 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
                 )
             return
 
+        if action == "export":
+            self._export_agent_pack(rest)
+            return
+
         if action not in {"preview", "install"}:
-            self._emit("Kullanim: /agent pack list|preview <yol>|install <yol> [--overwrite] [--yes]")
+            self._emit(
+                "Kullanim: /agent pack list|preview <yol>|install <yol> [--overwrite] [--yes]|"
+                "export <ad> [--agents a,b] [--tools c,d] [--all] [--out <klasor>]"
+            )
             return
 
         positional, flags = self._parse_flags(rest, bool_flags={"overwrite", "yes"})
@@ -681,6 +690,40 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         self._emit(f"  Ajanlar: {', '.join(pack['installed_agents']) or '-'}")
         self._emit(f"  Tool'lar: {', '.join(pack['installed_tools']) or '-'}")
         self._reload_agents()
+
+    def _export_agent_pack(self, args: list[str]) -> None:
+        positional, flags = self._parse_flags(args, bool_flags={"all", "overwrite"})
+        if len(positional) != 1:
+            self._emit(
+                'Kullanim: /agent pack export <pack_adi> [--agents a,b] [--tools c,d] [--all] '
+                '[--out <klasor>] [--version 0.1.0] [--desc "..."] [--overwrite]'
+            )
+            self._emit("   --agents verilmezse ajanlarin kullandigi custom tool'lar otomatik toplanir.")
+            return
+
+        result = _studio().export_agent_pack(
+            positional[0],
+            out_dir=str(flags.get("out") or ""),
+            agents=self._split_name_list(flags.get("agents")),
+            tools=self._split_name_list(flags.get("tools")),
+            include_all=bool(flags.get("all")),
+            version=str(flags.get("version") or "0.1.0"),
+            description=str(flags.get("desc") or flags.get("description") or ""),
+            overwrite=bool(flags.get("overwrite")),
+        )
+
+        self._emit(self._color(f"Pack olusturuldu: {result['name']} v{result['version']} ({result['type']})", "green"))
+        self._emit(f"  Konum   : {result['path']}")
+        self._emit(f"  Ajanlar : {', '.join(result['agents']) or '-'}")
+        self._emit(f"  Tool'lar: {', '.join(result['tools']) or '-'}")
+        if result["env_vars"]:
+            self._emit(f"  Env     : {', '.join(result['env_vars'])} (env.example'a sadece adlar yazildi)")
+        self._emit("  Dosyalar:")
+        for item in result["files"]:
+            self._emit(f"    {item}")
+        for warning in result["warnings"]:
+            self._emit(self._color(f"  Uyari: {warning}", "yellow"))
+        self._emit(f"  Kurmak icin: /agent pack install {result['path']}")
 
     def _print_pack_preview(self, preview: dict[str, Any]) -> None:
         self._emit(self._color(f"Pack: {preview['name']} v{preview['version']} ({preview['type']})", "bold"))
