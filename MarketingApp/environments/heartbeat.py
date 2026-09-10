@@ -8,6 +8,7 @@ ve terminal tarafina runtime durumunu sunar.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import sqlite3
@@ -309,6 +310,131 @@ def set_enabled_in_content(content: str, enabled: bool) -> str:
             count=1,
         )
     return f"{enabled_line}\n\n{(content or '').lstrip()}" if (content or "").strip() else f"{enabled_line}\n"
+
+
+def write_config_content(content: str) -> dict[str, Any]:
+    """Config metnini once dogrular, sonra atomik olarak diske yazar."""
+    summary = summarize_config_content(content)
+    if not summary["valid"]:
+        raise HeartbeatConfigError(summary["validation_error"] or "Config gecersiz.")
+
+    directory = os.path.dirname(_CONFIG_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    temporary = f"{_CONFIG_PATH}.tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    os.replace(temporary, _CONFIG_PATH)
+    return summary
+
+
+def _locate_tasks_block(content: str) -> tuple[list[str], int, int, str]:
+    """'tasks:' listesinin satir sinirlarini ve list item girintisini bulur.
+
+    Config YAML anchor/alias (`&post_gorevi` / `*post_gorevi`) ve yorum iceriyor;
+    safe_load + safe_dump ile round-trip bunlari yok edecegi icin gorev ekleme ve
+    cikarma islemleri metin seviyesinde yapilir.
+    """
+    lines = (content or "").splitlines()
+    start = next((i for i, line in enumerate(lines) if re.fullmatch(r"tasks\s*:\s*", line)), None)
+    if start is None:
+        raise HeartbeatConfigError("Config icinde 'tasks:' anahtari bulunamadi.")
+
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and not line[0].isspace():
+            end = index
+            break
+
+    indent = "  "
+    for index in range(start + 1, end):
+        match = re.match(r"^(\s*)-\s", lines[index])
+        if match:
+            indent = match.group(1)
+            break
+    return lines, start, end, indent
+
+
+def _task_item_ranges(lines: list[str], start: int, end: int, indent: str) -> list[tuple[int, int]]:
+    starts = [i for i in range(start + 1, end) if re.match(rf"^{re.escape(indent)}-\s", lines[i])]
+    return [(item, starts[pos + 1] if pos + 1 < len(starts) else end) for pos, item in enumerate(starts)]
+
+
+def add_task_to_content(
+    content: str,
+    *,
+    gorev: str,
+    cron: str,
+    task_id: str = "",
+    name: str = "",
+    enabled: bool = True,
+) -> tuple[str, str]:
+    """tasks listesine yeni bir gorev blogu ekler; (yeni_icerik, task_id) dondurur."""
+    gorev_text = (gorev or "").strip()
+    if not gorev_text:
+        raise HeartbeatConfigError("Gorev metni bos olamaz.")
+    cron_value = (cron or "").strip()
+    _validate_cron(cron_value)
+
+    existing = {task.task_id for task in parse_config_content(content)["tasks"]}
+    if task_id:
+        task_id = _validate_task_id(task_id)
+        if task_id in existing:
+            raise HeartbeatConfigError(f"'{task_id}' zaten kayitli.")
+    else:
+        seed = _slugify(name or cron_value or "job")[:24] or "job"
+        counter = len(existing) + 1
+        task_id = f"task_{counter:02d}_{seed}"
+        while task_id in existing:
+            counter += 1
+            task_id = f"task_{counter:02d}_{seed}"
+        task_id = _validate_task_id(task_id)
+
+    lines, start, end, indent = _locate_tasks_block(content)
+    child = indent + "  "
+    block = [f"{indent}- id: {task_id}"]
+    if (name or "").strip():
+        block.append(f"{child}name: {json.dumps(name.strip(), ensure_ascii=False)}")
+    block.append(f"{child}cron: {json.dumps(cron_value, ensure_ascii=False)}")
+    if not enabled:
+        block.append(f"{child}enabled: false")
+    block.append(f"{child}gorev: >")
+    block.extend(f"{child}  {line.strip()}" for line in gorev_text.splitlines() if line.strip())
+
+    insert_at = end
+    while insert_at > start + 1 and not lines[insert_at - 1].strip():
+        insert_at -= 1
+
+    updated = "\n".join(lines[:insert_at] + [""] + block + lines[insert_at:]).rstrip() + "\n"
+    parse_config_content(updated)
+    return updated, task_id
+
+
+def remove_task_from_content(content: str, task_id: str) -> str:
+    """tasks listesinden verilen id'ye sahip gorev blogunu siler."""
+    normalized = _validate_task_id(task_id)
+    if not any(task.task_id == normalized for task in parse_config_content(content)["tasks"]):
+        raise HeartbeatConfigError(f"Task bulunamadi: {normalized}")
+
+    lines, start, end, indent = _locate_tasks_block(content)
+    target: tuple[int, int] | None = None
+    for item_start, item_end in _task_item_ranges(lines, start, end, indent):
+        chunk = "\n".join(lines[item_start:item_end])
+        match = re.search(r"(?m)^\s*(?:-\s+)?id\s*:\s*(.+?)\s*$", chunk)
+        if match and match.group(1).strip().strip("\"'") == normalized:
+            target = (item_start, item_end)
+            break
+
+    if target is None:
+        raise HeartbeatConfigError(
+            f"'{normalized}' config metninde acik bir 'id:' satiriyla tanimlanmamis; elle silmen gerekiyor."
+        )
+
+    item_start, item_end = target
+    updated = "\n".join(lines[:item_start] + lines[item_end:]).rstrip() + "\n"
+    parse_config_content(updated)
+    return updated
 
 
 def load_config() -> dict[str, Any]:
