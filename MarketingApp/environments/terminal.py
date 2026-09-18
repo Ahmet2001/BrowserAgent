@@ -38,6 +38,7 @@ from MarketingApp.environments.heartbeat import (
 )
 
 
+from MarketingApp import telemetry
 from MarketingApp.paths import workspace_path
 
 
@@ -68,7 +69,9 @@ class TerminalManager:
         input_func: Callable[[str], Any] = input,
         output_func: Callable[[str], Any] = print,
         history_file: str = _HISTORY_FILE,
+        source: str = "terminal",
     ):
+        self.source = source
         self.base_model = base_model
         self.telegram_enabled = bool(telegram_enabled)
         self.discord_enabled = bool(discord_enabled)
@@ -177,6 +180,12 @@ class TerminalManager:
             self._print_logs(args)
         elif command == "/errors":
             self._print_errors(args)
+        elif command == "/runs":
+            self._print_runs(args)
+        elif command == "/run":
+            self._show_run(args)
+        elif command == "/usage":
+            self._print_usage(args)
         elif command == "/history":
             self._print_history()
         elif command == "/clear":
@@ -219,10 +228,14 @@ Komutlar
   /tool create --file <yol> --all         Dosyadaki tum fonksiyonlari tool yap
   /tool edit <ad> [bayrak]        Custom tool'u guncelle
   /tool delete <ad> [--yes]       Custom tool'u sil (--keep-file dosyayi birakir)
-  /logs [adet]                    Son loglari goster (varsayilan 15)
+  /logs [adet] [--since 24h] [--type T] [--grep metin] [--run id]   Kalici loglar (--memory: sadece bellek)
+  /runs [adet] [--source S] [--status S] [--since 24h]    Kosu gecmisi (terminal, heartbeat, Telegram...)
+  /run <id>                       Bir kosunun detayi: sure, hata, token kirilimi, olaylar
+  /usage [--since 24h] [--by agent|model|source|day|run]  Token kullanimi (ve varsa maliyet tahmini)
   /errors [arama]                 Config/runtime hatalarini goster
   /heartbeat                      Zamanlayici ve gorev durumunu goster
   /heartbeat show <id>            Gorev detayini goster
+  /heartbeat log [id] [adet]      Gorevin gecmis kosulari: ne zaman, ne kadar surdu, ne uretti
   /heartbeat add --cron X --gorev "..."   Yeni zamanli gorev ekle
   /heartbeat remove <id> [--yes]  Zamanli gorevi sil
   /heartbeat run <id>             Bir heartbeat gorevini simdi calistir
@@ -311,6 +324,8 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             )
         else:
             self._emit("  Config     : temiz")
+
+        self._print_telemetry_status()
 
     def _studio_errors(self, name: str = "") -> list[dict[str, Any]]:
         """BaseModel'in topladigi agent studio hatalari; istege bagli olarak tek ajana filtreli.
@@ -600,7 +615,12 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         self._emit(self._color(f"{name} calistiriliyor...", "yellow"))
         started = time.monotonic()
         try:
-            answer = await runner(gorev)
+            with telemetry.run_scope(self.source, f"agent test: {name}", detail="agent_test") as run:
+                answer = await runner(gorev)
+                run.set_summary(answer)
+                if str(answer).startswith("[SISTEM_MESAJI_GIZLI]"):
+                    # BaseModel'in runner'i hatalari exception yerine bu on ekli metne cevirir.
+                    run.fail(answer)
         except Exception as exc:
             self._emit(self._color(f"Ajan hatasi: {exc}", "red"))
             return
@@ -1342,16 +1362,218 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
         self._emit(self._color(f"Custom tool silindi: {name}", "green"))
         self._reload_agents()
 
-    def _print_logs(self, args: list[str]) -> None:
-        try:
-            count = min(100, max(1, int(args[0]))) if args else 15
-        except ValueError:
-            self._emit("Kullanim: /logs [adet]")
+    def _print_telemetry_status(self) -> None:
+        health = telemetry.health()
+        if not health["ok"]:
+            self._emit(self._color(f"  Kayit      : HATA - {health['last_error']}", "red"))
             return
+        self._emit(
+            f"  Kayit      : {health.get('events', 0)} olay, {health.get('runs', 0)} kosu "
+            f"({health['retention_days']} gun saklanir)" if health["retention_days"] > 0 else
+            f"  Kayit      : {health.get('events', 0)} olay, {health.get('runs', 0)} kosu (sinirsiz saklanir)"
+        )
+        try:
+            today = telemetry.usage_summary(telemetry.parse_since("today"), group_by="agent")["totals"]
+        except Exception:
+            return
+        if today["calls"]:
+            self._emit(f"  Bugun      : {today['calls']} LLM cagrisi, {self._fmt_tokens(today['total'])} token")
+
+    @staticmethod
+    def _fmt_tokens(value: int | float) -> str:
+        value = int(value or 0)
+        if value >= 1_000_000:
+            return f"{value / 1_000_000:.1f}M"
+        if value >= 10_000:
+            return f"{value / 1_000:.0f}k"
+        if value >= 1_000:
+            return f"{value / 1_000:.1f}k"
+        return str(value)
+
+    @staticmethod
+    def _fmt_duration_ms(value: int | None) -> str:
+        if value is None:
+            return "-"
+        seconds = value / 1000
+        if seconds >= 60:
+            return f"{int(seconds // 60)}dk{int(seconds % 60):02d}sn"
+        return f"{seconds:.1f}sn"
+
+    def _print_logs(self, args: list[str]) -> None:
+        """Kalici olay logu. --memory eski davranisi (sadece bu process'in son 100 satiri) verir."""
+        positional, flags = self._parse_flags(args, bool_flags={"memory"})
+        try:
+            count = min(500, max(1, int(positional[0]))) if positional else 15
+        except ValueError:
+            self._emit("Kullanim: /logs [adet] [--type T] [--since 24h] [--grep metin] [--run <id>] [--memory]")
+            return
+
+        if not flags.get("memory"):
+            try:
+                since = telemetry.parse_since(flags.get("since"))
+                run_id = None
+                if flags.get("run"):
+                    matches = telemetry.find_runs(str(flags["run"]))
+                    if len(matches) != 1:
+                        self._emit(self._color("--run icin tek bir kosu eslesmeli; /runs ile id'ye bak.", "red"))
+                        return
+                    run_id = matches[0]["run_id"]
+                events = telemetry.recent_events(
+                    count, type_=flags.get("type"), since=since, grep=flags.get("grep"), run_id=run_id
+                )
+            except ValueError as exc:
+                self._emit(self._color(str(exc), "red"))
+                return
+            except Exception as exc:
+                self._emit(self._color(f"Kalici log okunamadi ({exc}); bellekteki loglar gosteriliyor.", "yellow"))
+            else:
+                self._emit(self._color(f"Loglar ({len(events)})", "bold"))
+                today = datetime.now().strftime("%Y-%m-%d")
+                for item in events:
+                    stamp = telemetry.format_ts(item["ts"])
+                    stamp = stamp[11:] if stamp.startswith(today) else stamp
+                    self._emit(f"  {stamp} [{item['type']}] {item['message']}")
+                if not events:
+                    self._emit("  Eslesen kayit yok.")
+                return
+
         logs = list(getattr(self.base_model, "logs", []))[-count:]
-        self._emit(self._color(f"Son loglar ({len(logs)})", "bold"))
+        self._emit(self._color(f"Bellekteki loglar ({len(logs)})", "bold"))
         for item in logs:
             self._emit(f"  {item.get('time', '--:--:--')} [{item.get('type', 'log')}] {item.get('message', '')}")
+
+    def _format_run_line(self, run: dict[str, Any]) -> str:
+        started = telemetry.format_ts(run["started_at"])[5:]  # MM-DD HH:MM:SS
+        tokens = f"{self._fmt_tokens(run['total_tokens']):>6} tok" if run["total_tokens"] else "         -"
+        return (
+            f"  {run['run_id']}  {started}  {run['source']:<10} {run['status']:<11} "
+            f"{self._fmt_duration_ms(run['duration_ms']):>8} {run['llm_calls']:>3} cagri {tokens}  {run['label'] or '-'}"
+        )
+
+    def _print_runs(self, args: list[str], *, job_id: str | None = None, title: str = "Kosular") -> None:
+        positional, flags = self._parse_flags(args)
+        try:
+            count = min(200, max(1, int(positional[0]))) if positional else 15
+        except ValueError:
+            self._emit("Kullanim: /runs [adet] [--source S] [--status S] [--job ID] [--since 24h]")
+            return
+        try:
+            runs = telemetry.recent_runs(
+                count,
+                source=flags.get("source"),
+                job_id=job_id or flags.get("job"),
+                status=flags.get("status"),
+                since=telemetry.parse_since(flags.get("since")),
+            )
+        except ValueError as exc:
+            self._emit(self._color(str(exc), "red"))
+            return
+        except Exception as exc:
+            self._emit(self._color(f"Kosu gecmisi okunamadi: {exc}", "red"))
+            return
+
+        self._emit(self._color(f"{title} ({len(runs)})", "bold"))
+        if not runs:
+            self._emit("  Eslesen kosu yok.")
+            return
+        for run in runs:
+            self._emit(self._format_run_line(run))
+            if run["error"]:
+                self._emit(self._color(f"      ! {run['error']}", "red" if run["status"] == "error" else "yellow"))
+            elif job_id and run["summary"]:
+                self._emit(f"      > {run['summary'][:200]}")
+
+    def _show_run(self, args: list[str]) -> None:
+        if len(args) != 1:
+            self._emit("Kullanim: /run <id>   (id'nin bir kismi yeterli; /runs ile bak)")
+            return
+        matches = telemetry.find_runs(args[0])
+        if not matches:
+            self._emit(self._color(f"Kosu bulunamadi: {args[0]}", "red"))
+            return
+        if len(matches) > 1:
+            self._emit(self._color("Birden fazla kosu eslesti, daha uzun bir id ver:", "yellow"))
+            for run in matches:
+                self._emit(self._format_run_line(run))
+            return
+
+        run = matches[0]
+        self._emit(self._color(f"Kosu {run['run_id']}", "bold"))
+        self._emit(f"  Kaynak    : {run['source']}" + (f" ({run['detail']})" if run["detail"] else ""))
+        self._emit(f"  Etiket    : {run['label'] or '-'}")
+        if run["job_id"]:
+            self._emit(f"  Job       : {run['job_id']}")
+        self._emit(f"  Durum     : {run['status']}")
+        self._emit(f"  Baslangic : {telemetry.format_ts(run['started_at'])}")
+        self._emit(f"  Sure      : {self._fmt_duration_ms(run['duration_ms'])}")
+        self._emit(
+            f"  LLM       : {run['llm_calls']} cagri, {self._fmt_tokens(run['total_tokens'])} token "
+            f"(girdi {self._fmt_tokens(run['prompt_tokens'])} / cikti {self._fmt_tokens(run['completion_tokens'])})"
+        )
+        if run["error"]:
+            self._emit(self._color(f"  Hata      : {run['error']}", "red"))
+        if run["summary"]:
+            self._emit(f"  Ozet      : {run['summary']}")
+
+        usage = telemetry.run_usage(run["run_id"])
+        if usage:
+            self._emit("  Ajan/model kirilimi:")
+            for row in usage:
+                self._emit(
+                    f"    {row['agent']:<24} {row['model']:<32} {row['calls']:>3} cagri  "
+                    f"{self._fmt_tokens(row['total_tokens']):>6} tok"
+                )
+        events = telemetry.recent_events(40, run_id=run["run_id"])
+        if events:
+            self._emit(f"  Olaylar ({len(events)}):")
+            for item in events:
+                self._emit(f"    {telemetry.format_ts(item['ts'], with_date=False)} [{item['type']}] {item['message']}")
+
+    def _print_usage(self, args: list[str]) -> None:
+        _, flags = self._parse_flags(args)
+        group_by = str(flags.get("by") or "agent").lower()
+        since_text = str(flags.get("since") or "24h")
+        try:
+            report = telemetry.usage_summary(telemetry.parse_since(since_text), group_by=group_by)
+        except ValueError as exc:
+            self._emit(self._color(str(exc), "red"))
+            self._emit("Kullanim: /usage [--since 24h|7d|today|2026-09-01] [--by agent|model|source|day|run]")
+            return
+        except Exception as exc:
+            self._emit(self._color(f"Kullanim verisi okunamadi: {exc}", "red"))
+            return
+
+        rows, totals = report["rows"], report["totals"]
+        self._emit(self._color(f"Token kullanimi (son {since_text}, {group_by} bazinda)", "bold"))
+        if not rows:
+            self._emit("  Bu aralikta kayitli LLM cagrisi yok.")
+            return
+
+        show_cost = report["pricing_loaded"]
+        header = f"  {group_by:<26}{'cagri':>6}{'girdi':>9}{'cikti':>9}{'toplam':>9}" + (f"{'~USD':>9}" if show_cost else "")
+        self._emit(header)
+        for row in rows[:40]:
+            cost = f"{row['cost']:>9.4f}" if show_cost and row["priced"] else (f"{'-':>9}" if show_cost else "")
+            self._emit(
+                f"  {str(row['key'])[:25]:<26}{row['calls']:>6}{self._fmt_tokens(row['prompt']):>9}"
+                f"{self._fmt_tokens(row['completion']):>9}{self._fmt_tokens(row['total']):>9}{cost}"
+            )
+        if len(rows) > 40:
+            self._emit(f"  ... {len(rows) - 40} satir daha")
+        total_cost = f"{totals['cost']:>9.4f}" if show_cost else ""
+        self._emit(
+            f"  {'TOPLAM':<26}{totals['calls']:>6}{self._fmt_tokens(totals['prompt']):>9}"
+            f"{self._fmt_tokens(totals['completion']):>9}{self._fmt_tokens(totals['total']):>9}{total_cost}"
+        )
+
+        if totals["unknown_calls"]:
+            self._emit(f"  Not: {totals['unknown_calls']} cagrida saglayici kullanim bilgisi dondurmedi (token sayilamadi).")
+        if group_by == "agent" and any(str(row["key"]) in {"arastirma_agent", "sistem_agent", "vlm_agent"} for row in rows):
+            self._emit("  Not: Gemini Live ajanlari (arastirma/sistem/vlm) oturum basina tek, yaklasik bir kayit uretir.")
+        if not show_cost:
+            self._emit("  Maliyet tahmini icin config/pricing.yaml olustur:  models: {model_adi: {input: 0.30, output: 2.50}}  (USD / 1M token)")
+        elif report["unpriced_models"]:
+            self._emit(f"  Not: fiyati tanimli olmayan modeller maliyete dahil degil: {', '.join(report['unpriced_models'])}")
 
     def _print_history(self) -> None:
         if not self.history:
@@ -1409,6 +1631,16 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             elif action == "show" and len(rest) == 1:
                 self._show_heartbeat_task(rest[0])
                 return
+            elif action == "log":
+                positional, _flags = self._parse_flags(rest)
+                job = positional[0] if positional and not positional[0].isdigit() else None
+                extra = [item for item in rest if item != job]
+                self._print_runs(
+                    extra + (["--source", "heartbeat"] if not job else []),
+                    job_id=job,
+                    title=f"Heartbeat gecmisi{f' ({job})' if job else ''}",
+                )
+                return
             elif action == "add":
                 await self._add_heartbeat_task(rest)
                 return
@@ -1420,7 +1652,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
                 return
             else:
                 self._emit(
-                    "Kullanim: /heartbeat [reload|run <id>|pause <id>|resume <id>|show <id>|"
+                    "Kullanim: /heartbeat [reload|run <id>|pause <id>|resume <id>|show <id>|log [id] [adet]|"
                     'add --cron X --gorev "..."|remove <id>|on|off]'
                 )
                 return
@@ -1535,11 +1767,12 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
                 self._emit(f"  ↳ {cleaned}")
 
         try:
-            result = await self.base_model.text_query(
-                user_text,
-                context=context,
-                on_direct_text=on_direct_text,
-            )
+            with telemetry.run_scope(self.source, " ".join(user_text.split())[:80], detail="chat"):
+                result = await self.base_model.text_query(
+                    user_text,
+                    context=context,
+                    on_direct_text=on_direct_text,
+                )
             answer = self._extract_result_text(result)
             self._add_history("assistant", answer)
             self._emit("")

@@ -10,6 +10,7 @@ import re
 import ast
 import shutil
 import sys
+import types
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -742,12 +743,13 @@ def load_custom_tool_callable(entry: dict[str, Any], *, include_disabled: bool =
         if not path.exists():
             return None, f"{path.name} bulunamadi."
         load_model_env_file()
+        # Kaynagi dogrudan derle: spec_from_file_location + exec_module __pycache__ kullanir ve .pyc
+        # dogrulamasi mtime'i SANIYE cozunurlugunde + dosya boyutuyla yapar. Ayni saniyede yapilan ayni
+        # boyutlu bir duzenleme (ornegin `return 1` -> `return 2`) sessizce eski bytecode'u calistirirdi.
         module_name = f"marketingapp_custom_tool_{name}_{path.stat().st_mtime_ns}"
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if not spec or not spec.loader:
-            return None, "Python module spec olusturulamadi."
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = types.ModuleType(module_name)
+        module.__file__ = str(path)
+        exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), module.__dict__)
         func = getattr(module, name, None)
         if not callable(func):
             return None, f"{name} fonksiyonu export edilmemis."
