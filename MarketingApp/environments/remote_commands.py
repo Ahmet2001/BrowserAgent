@@ -41,8 +41,8 @@ def normalize_line(text: str) -> str:
     Telegram grup sohbetlerinde komut ``/agent@BotAdi`` seklinde gelir.
     """
     cleaned = (text or "").strip()
-    cleaned = cleaned.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
-    cleaned = re.sub(r"[–—](?=[A-Za-z])", "--", cleaned)
+    cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+    cleaned = re.sub(r"[\u2013\u2014](?=[A-Za-z])", "--", cleaned)
     return re.sub(r"^(/\w+)@\w+", r"\1", cleaned)
 
 
