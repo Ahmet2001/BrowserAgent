@@ -16,9 +16,12 @@ Mimar is a Python agent platform built around a single orchestrator LLM (`BaseMo
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Terminal Commands](#terminal-commands)
+- [Operations: logs, run history, usage](#operations-logs-run-history-usage)
+- [Telegram and Discord](#telegram-and-discord)
 - [Using Mimar as an Embedded Agent](#using-mimar-as-an-embedded-agent)
 - [Project Structure](#project-structure)
 - [Requirements](#requirements)
+- [Testing](#testing)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -33,7 +36,9 @@ Mimar is a Python agent platform built around a single orchestrator LLM (`BaseMo
 - **Agent Studio** — add, enable/disable, and reconfigure agents and tools through YAML config, no code changes required.
 - **Agent Packs** — plug-and-play bundles of agents, tools, and prompts.
 - **Heartbeat Scheduler** — cron/interval-based background jobs (APScheduler), managed from the terminal.
-- **Interactive terminal control interface** — inspect and toggle agents/tools, run heartbeat jobs, review logs, approve risky actions, all from one CLI session.
+- **Interactive terminal control interface** — create, edit, copy, test and delete agents and tools, schedule heartbeat jobs, package and share a setup, review logs, approve risky actions, all from one CLI session and without a restart.
+- **Operations store** — persistent logs, per-run history (what each scheduled job did, how long it took, what it cost) and LLM token usage, queryable from the terminal.
+- **Remote management with access control** — the same management commands over Telegram/Discord for allow-listed admins only, with remote code upload deliberately blocked.
 
 ## Architecture
 
@@ -51,6 +56,7 @@ main.py
 - **`BaseModel`** (`MarketingApp/llms/BaseModel.py`) is the orchestrator: an OpenAI-compatible chat-completions loop that calls tools and sub-agents until it has a final answer.
 - **`SubModel`** agents (`MarketingApp/llms/SubModels/`) are self-contained mini-agents, each with their own model and tool subset, exposed to `BaseModel` as a single callable tool.
 - **`AutomationCoordinator`** (`MarketingApp/environments/automation_runtime.py`) is a lock ensuring the terminal, heartbeat, and Telegram/Discord triggers never touch the shared browser session concurrently.
+- **`telemetry`** (`MarketingApp/telemetry.py`) is the operations store: a `run` is opened per unit of work (a chat turn, a heartbeat job) and carried in a `ContextVar`, so every log line and LLM call made inside it is attached to it automatically.
 - **`Agent Studio`** (`MarketingApp/llms/agent_studio.py`) reads `config/agents.yaml`, `config/custom_tools.yaml`, and `config/agent_packs.yaml` to assemble the runtime — agents and tools can be added, toggled, or reconfigured without touching code.
 
 ## Quick Start
@@ -95,29 +101,95 @@ Key variables:
 | `GEMINI_API_KEY` / `GEMINI_API_KEY_SECONDARY` | Gemini API keys (with failover) |
 | `TELEGRAM_TOKEN` / `DISCORD_TOKEN` | Optional chat platform integrations |
 | `PEXELS_API_KEY` | Stock photo/video search for the Content Creator agent |
+| `TELEGRAM_ALLOWED_USER_IDS` / `DISCORD_ALLOWED_USER_IDS` | Who may chat with the bot (see [Telegram and Discord](#telegram-and-discord)) |
+| `TELEGRAM_ADMIN_IDS` / `DISCORD_ADMIN_IDS` | Who may run management commands remotely |
+| `MIMAR_TELEMETRY_RETENTION_DAYS` | How long logs/runs/usage are kept (default `30`, `0` = forever) |
 
-All API keys and tokens live only in the gitignored `.env*` files — never commit real credentials.
+All API keys and tokens live only in the gitignored `.env*` files (`.env`, `.env.local`, `.env.model`, `.env.secrets`) — never commit real credentials.
 
 ## Terminal Commands
 
-Once running, type a message to chat with Mimar, or use a command:
+Once running, type a message to chat with Mimar, or use a command. `/help` prints everything below.
 
 | Command | Description |
 |---|---|
-| `/help`, `/?` | Show the command list |
-| `/status` | Show model, provider, uptime, and channel status |
-| `/agents` | List all registered agents |
+| `/status` | Model, provider, uptime, channels, config errors, store health and today's token usage |
+| `/agents`, `/agent list` | List agents |
 | `/agent <name> on\|off\|toggle` | Enable/disable an agent |
-| `/tools [query]` | List or filter tools |
+| `/agent show <name>` | Type, model, tool list, prompt and any config errors for one agent |
+| `/agent create <name> [flags]` | Create an agent (`--model`, `--tools`, `--tool-group`, `--tool-category`, `--prompt`, `--desc`, `--dry-run`) |
+| `/agent edit <name> [flags]` | Change one (`--add-tools`, `--remove-tools`, `--remove-tool-group`, `--enable`/`--disable`, …) |
+| `/agent copy <from> <to>` | Clone an agent with its resolved tool list |
+| `/agent test <name> "task"` | Run a single agent directly and record it as a run |
+| `/agent delete <name> [--yes]` | Delete a config agent |
+| `/agent pack list\|preview\|install\|export` | Manage agent packs, see [Sharing a setup](#sharing-a-setup) |
+| `/tools [query] [--group G] [--category C] [--risk high]` | List and filter tools; `--list-groups` shows the groups, categories and risk split |
 | `/tool <name> on\|off\|toggle` | Enable/disable a tool |
-| `/logs [count]` | Show recent logs (default 15) |
-| `/heartbeat` | Show scheduler and job status |
-| `/heartbeat run\|pause\|resume <id>` | Control a scheduled job |
-| `/heartbeat reload` | Reload the heartbeat config from disk |
+| `/tool create\|edit\|show\|delete\|list` | Manage custom tools, see [Custom tools](#custom-tools) |
+| `/heartbeat` | Scheduler and job status |
+| `/heartbeat add --cron X --gorev "..."` | Add a scheduled task (`startup`, `*/N` or `HH:MM`) |
+| `/heartbeat remove <id>`, `show <id>`, `on`, `off` | Remove/inspect a task, enable/disable the scheduler |
+| `/heartbeat run\|pause\|resume <id>`, `reload` | Control jobs, reload the config |
+| `/heartbeat log [id] [n]` | Past runs of a job: when, how long, what it produced |
+| `/logs [n] [--since 24h] [--type T] [--grep text] [--run id]` | Persistent logs (`--memory` = this process only) |
+| `/runs [n] [--source S] [--status S] [--since 24h]` | Run history across the terminal, heartbeat, Telegram and Discord |
+| `/run <id>` | One run in detail: duration, error, token breakdown by agent/model, its log lines |
+| `/usage [--since 24h] [--by agent\|model\|source\|day\|run]` | LLM token usage, plus a cost estimate if `config/pricing.yaml` exists |
+| `/errors [text]` | Config problems that were previously collected but never shown |
 | `/reload` | Reload agent/custom tool config |
-| `/history` | Show terminal chat history |
-| `/clear` | Clear terminal chat history |
-| `/exit` | Shut down safely |
+| `/history`, `/clear`, `/exit` | Chat history / shut down |
+
+Destructive commands ask for confirmation unless you pass `--yes`. `--dry-run` on `agent create/edit` and `heartbeat add` previews the result without saving.
+
+### Custom tools
+
+```
+/tool create fiyat_getir --file ~/fiyat_getir.py --desc "Returns a price"
+/tool create --file ~/kripto.py --all            # every public function in the file becomes a tool
+/tool create --file ~/kripto.py --names a,b      # only these, sharing one copy of the file
+/tool create x --code "def x(): return 1" --desc "inline"
+```
+
+The code is compiled, checked for a function named after the tool, and actually imported before it is accepted, so a broken tool is rejected at write time. The file is **copied** into `workspace/custom_tools/`; re-run `/tool edit <name> --file …` to pick up later changes. `--env NAME=value` writes to the gitignored `.env.model`; a bare `--env NAME` only records the requirement.
+
+### Sharing a setup
+
+```
+/agent pack export my_pack --agents my_agent --out ~/my_pack   # or --all
+/agent pack install ~/my_pack
+```
+
+`export` writes `plugin.yaml`, `agents/`, `prompts/`, `tools/`, a README and an `env.example` that contains variable **names only** — never values. Builtin agents and builtin tools cannot be packaged (`/agent copy` makes a config copy you can).
+
+## Operations: logs, run history, usage
+
+Everything is stored in `workspace/runtime/telemetry.sqlite` (gitignored) and kept for `MIMAR_TELEMETRY_RETENTION_DAYS` days.
+
+- **Logs** survive restarts (`/logs`).
+- **Runs** record every chat turn and heartbeat job — including skipped ones and retry attempts — with status, duration, error and a summary of the output (`/runs`, `/run`, `/heartbeat log`). The heartbeat's own `job_runtime` table only keeps the *last* run per job; this keeps them all.
+- **Usage** records the tokens of every LLM call, attributed to the run, agent, model and channel it happened in (`/usage`).
+
+Cost is estimated only for models you price in `config/pricing.yaml` (USD per 1M tokens); Mimar ships no prices because they change and model names are install-specific:
+
+```yaml
+models:
+  gemini-2.5-flash: {input: 0.30, output: 2.50}
+```
+
+Known limits: the Gemini Live agents (`arastirma_agent`, `sistem_agent`, `vlm_agent`) produce one **approximate** usage row per session, because the SDK does not document whether Live `usage_metadata` is cumulative; providers that return no usage data are counted as calls with unknown tokens.
+
+## Telegram and Discord
+
+The bots can now run the management commands above, but **who may talk to them is configured by you**:
+
+| Variable | Meaning |
+|---|---|
+| `<CHANNEL>_ALLOWED_USER_IDS` | Who may chat. **If unset, chat is open to everyone** (the old behaviour) and startup prints a warning. |
+| `<CHANNEL>_ADMIN_IDS` | Who may run management commands. If unset they are **disabled**. |
+
+Send `/id` (Telegram) or `!id` (Discord) to the bot to learn your numeric ID. Unauthorised users get no reply; each attempt is written to the log (`/logs --type remote`).
+
+Management commands are `/agent`, `/tool`, `/heartbeat`, `/usage`, … on Telegram and `!agent`, `!tool`, … on Discord. Even for an admin, remote sessions cannot run `/tool create|edit|delete` or `/tool show --code` (tool code runs on the server), `/agent pack …` (filesystem paths) or `/agent create --builtin`, and `agent delete` / `heartbeat remove` require `--yes`.
 
 ## Using Mimar as an Embedded Agent
 
@@ -140,12 +212,15 @@ MarketingApp/
 ├── agent_api.py         # Embeddable agent wrapper (MimarAgent)
 ├── paths.py              # Central, overridable workspace/config path resolution
 ├── main.py               # Entry point (python -m MarketingApp.main)
+├── telemetry.py           # Persistent logs, run history and token usage
 ├── araclar/               # Tools: browser, search, memory, content creation, workspace, skills
 ├── config/                # agents.yaml, custom_tools.yaml, agent_packs.yaml, heartbeat_config.yaml
-├── environments/          # terminal.py, heartbeat.py, telegram.py, discord_bot.py, automation_runtime.py
+├── environments/          # terminal.py, heartbeat.py, telegram.py, discord_bot.py, automation_runtime.py,
+│                          # access.py (bot allowlists), remote_commands.py (terminal commands over chat)
 ├── llms/                  # BaseModel orchestrator, Agent Studio, SubModels/
 ├── legacy/panel/          # Archived FastAPI web panel (superseded by the terminal interface)
 └── workspace/              # Runtime data: memory, drafts, assets, custom tools, agent packs
+tests/                       # unittest suite (isolated temp workspace)
 ```
 
 ## Requirements
@@ -153,6 +228,14 @@ MarketingApp/
 - Python 3.11+
 - Chrome browser (for X/social automation)
 - An active X (Twitter) session in a Chrome profile, for social features
+
+## Testing
+
+```bash
+python -m unittest discover -s tests
+```
+
+The suite runs against a temporary workspace and config directory (`tests/_env.py`), so it never touches your real agents, tools or telemetry. Use `discover -s tests` rather than `tests.<module>`: a dependency installs a top-level `tests` package that shadows it.
 
 ## Contributing
 
