@@ -97,8 +97,8 @@ _initialized_path: str | None = None
 _last_error: str | None = None
 _last_prune_monotonic: float | None = None
 
-_run_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("mimar_run_id", default=None)
-_source_var: contextvars.ContextVar[str] = contextvars.ContextVar("mimar_source", default="direct")
+_run_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("ethgent_run_id", default=None)
+_source_var: contextvars.ContextVar[str] = contextvars.ContextVar("ethgent_source", default="direct")
 
 GROUP_BY_CHOICES = ("agent", "model", "source", "day", "run")
 
@@ -150,7 +150,7 @@ def parse_since(value: str | None) -> str | None:
 
 
 def retention_days() -> int:
-    raw = os.getenv("MIMAR_TELEMETRY_RETENTION_DAYS", "").strip()
+    raw = os.getenv("ETHGENT_TELEMETRY_RETENTION_DAYS", "").strip()
     if not raw:
         return _DEFAULT_RETENTION_DAYS
     try:

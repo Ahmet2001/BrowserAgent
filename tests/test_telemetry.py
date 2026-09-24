@@ -295,9 +295,9 @@ class RetentionAndHealthTests(TelemetryCase):
         import os
         from unittest import mock
 
-        with mock.patch.dict(os.environ, {"MIMAR_TELEMETRY_RETENTION_DAYS": "7"}):
+        with mock.patch.dict(os.environ, {"ETHGENT_TELEMETRY_RETENTION_DAYS": "7"}):
             self.assertEqual(self.t.retention_days(), 7)
-        with mock.patch.dict(os.environ, {"MIMAR_TELEMETRY_RETENTION_DAYS": "abc"}):
+        with mock.patch.dict(os.environ, {"ETHGENT_TELEMETRY_RETENTION_DAYS": "abc"}):
             self.assertEqual(self.t.retention_days(), 30)
 
     async def test_health_reports_counts(self):

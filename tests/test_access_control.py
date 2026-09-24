@@ -138,8 +138,8 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(remote_commands.normalize_line('/agent create x --desc "a — b"'), '/agent create x --desc "a — b"')
 
     def test_group_chat_bot_suffix_is_removed(self):
-        self.assertEqual(remote_commands.normalize_line("/agent@MimarBot create x"), "/agent create x")
-        self.assertEqual(remote_commands.normalize_line("  /usage@Mimar_Bot --by model "), "/usage --by model")
+        self.assertEqual(remote_commands.normalize_line("/agent@EthgentBot create x"), "/agent create x")
+        self.assertEqual(remote_commands.normalize_line("  /usage@Ethgent_Bot --by model "), "/usage --by model")
 
     def test_a_dash_smuggled_flag_still_hits_the_allowlist(self):
         import shlex
@@ -298,7 +298,7 @@ class TelegramGateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_members_admins_and_id_lookups_pass(self):
         with env(TELEGRAM_ALLOWED_USER_IDS="10", TELEGRAM_ADMIN_IDS="99"):
-            for user_id, text in ((10, "selam"), (99, "selam"), (666, "/id"), (666, "/id@MimarBot")):
+            for user_id, text in ((10, "selam"), (99, "selam"), (666, "/id"), (666, "/id@EthgentBot")):
                 update, _ = tg_update(user_id, text)
                 self.assertIsNone(await self.tg.auth_gate(update, None), (user_id, text))
 
