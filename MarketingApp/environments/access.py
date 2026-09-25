@@ -2,7 +2,7 @@
 
 Neden var
 ---------
-Botlarda hic yetki kontrolu yoktu: bota yazabilen HERKES Mimar'i, dolayisiyla bagli
+Botlarda hic yetki kontrolu yoktu: bota yazabilen HERKES Ethgent'i, dolayisiyla bagli
 gercek X hesabini yonlendirebiliyordu. Ayrica terminal komutlari (ajan/tool/heartbeat
 yonetimi) botlara tasinacaksa, bunun yalnizca belirli kisilere acik olmasi gerekir.
 
@@ -83,7 +83,7 @@ def startup_warnings(channel: str) -> list[str]:
     if is_open(channel):
         warnings.append(
             f"{channel.capitalize()} botu HERKESE ACIK: {prefix}_ALLOWED_USER_IDS tanimli degil. "
-            "Bota yazan herkes Mimar'i (ve bagli hesaplari) yonlendirebilir."
+            "Bota yazan herkes Ethgent'i (ve bagli hesaplari) yonlendirebilir."
         )
     if not admin_ids(channel):
         warnings.append(

@@ -35,7 +35,7 @@ PROVIDER_FAILURE_COOLDOWN_SECONDS = 10
 DEFAULT_TOOL_TIMEOUT_SECONDS = 150.0
 
 SYSTEM_INSTRUCTION = """
-Sen "Mimar" projesinin merkezi orkestratorusun.
+Sen "Ethgent" projesinin merkezi orkestratorusun.
 
 CALISMA KURALLARI:
 1. Yalnizca bu istekte tool semasinda gorunen aktif tool ve alt ajanlari kullan.

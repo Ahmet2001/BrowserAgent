@@ -21,18 +21,18 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-if "MIMAR_TEST_ROOT" not in os.environ:
-    _root = Path(tempfile.mkdtemp(prefix="mimar-tests-"))
+if "ETHGENT_TEST_ROOT" not in os.environ:
+    _root = Path(tempfile.mkdtemp(prefix="ethgent-tests-"))
     (_root / "config").mkdir()
     (_root / "workspace").mkdir()
-    os.environ["MIMAR_TEST_ROOT"] = str(_root)
-    os.environ["MIMAR_CONFIG_DIR"] = str(_root / "config")
-    os.environ["MIMAR_WORKSPACE_DIR"] = str(_root / "workspace")
+    os.environ["ETHGENT_TEST_ROOT"] = str(_root)
+    os.environ["ETHGENT_CONFIG_DIR"] = str(_root / "config")
+    os.environ["ETHGENT_WORKSPACE_DIR"] = str(_root / "workspace")
     atexit.register(shutil.rmtree, _root, ignore_errors=True)
 
-ROOT = Path(os.environ["MIMAR_TEST_ROOT"])
-CONFIG_DIR = Path(os.environ["MIMAR_CONFIG_DIR"])
-WORKSPACE_DIR = Path(os.environ["MIMAR_WORKSPACE_DIR"])
+ROOT = Path(os.environ["ETHGENT_TEST_ROOT"])
+CONFIG_DIR = Path(os.environ["ETHGENT_CONFIG_DIR"])
+WORKSPACE_DIR = Path(os.environ["ETHGENT_WORKSPACE_DIR"])
 
 _paths = sys.modules.get("MarketingApp.paths")
 if _paths is not None and Path(_paths.WORKSPACE_DIR).resolve() != WORKSPACE_DIR.resolve():

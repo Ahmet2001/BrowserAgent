@@ -265,7 +265,7 @@ async def _send_cevap_metinleri(context, chat_id: int, cevap_metinleri: list):
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 *Merhaba! Ben Mimar AI Asistanım.*\n\n"
+        "🤖 *Merhaba! Ben Ethgent AI Asistanım.*\n\n"
         "📝 Yazılı mesaj gönder veya 🎤 sesli mesaj gönder.\n"
         "📸 Fotoğraf gönderirsen analiz edebilirim.\n\n"
         "Kullanılabilir komutlar:\n"
@@ -294,7 +294,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     mesaj = (
-        "🧠 *Mimar AI Yetkinlikleri*\n\n"
+        "🧠 *Ethgent AI Yetkinlikleri*\n\n"
         "🔧 *Araçlarım:*\n" + araç_listesi + "\n\n"
         "🤖 *Uzmanlaşmış Sub-Ajanlarım:*\n" + submodel_listesi + "\n\n"
         "💡 Natural dil ile her şeyi yapabilirim!"

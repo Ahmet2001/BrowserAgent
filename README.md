@@ -1,8 +1,8 @@
-# Mimar
+# Ethgent
 
 **AI-powered social media management, content creation, and browser automation orchestrator.**
 
-Mimar is a Python agent platform built around a single orchestrator LLM (`BaseModel`) that delegates work to specialized sub-agents — social media, content creation, browser automation, research — each with its own tool set. It's controlled through an interactive terminal, and can also be embedded as a component ("agent leg") inside a larger system.
+Ethgent is a Python agent platform built around a single orchestrator LLM (`BaseModel`) that delegates work to specialized sub-agents — social media, content creation, browser automation, research — each with its own tool set. It's controlled through an interactive terminal, and can also be embedded as a component ("agent leg") inside a larger system.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -18,7 +18,7 @@ Mimar is a Python agent platform built around a single orchestrator LLM (`BaseMo
 - [Terminal Commands](#terminal-commands)
 - [Operations: logs, run history, usage](#operations-logs-run-history-usage)
 - [Telegram and Discord](#telegram-and-discord)
-- [Using Mimar as an Embedded Agent](#using-mimar-as-an-embedded-agent)
+- [Using Ethgent as an Embedded Agent](#using-ethgent-as-an-embedded-agent)
 - [Project Structure](#project-structure)
 - [Requirements](#requirements)
 - [Testing](#testing)
@@ -103,13 +103,13 @@ Key variables:
 | `PEXELS_API_KEY` | Stock photo/video search for the Content Creator agent |
 | `TELEGRAM_ALLOWED_USER_IDS` / `DISCORD_ALLOWED_USER_IDS` | Who may chat with the bot (see [Telegram and Discord](#telegram-and-discord)) |
 | `TELEGRAM_ADMIN_IDS` / `DISCORD_ADMIN_IDS` | Who may run management commands remotely |
-| `MIMAR_TELEMETRY_RETENTION_DAYS` | How long logs/runs/usage are kept (default `30`, `0` = forever) |
+| `ETHGENT_TELEMETRY_RETENTION_DAYS` | How long logs/runs/usage are kept (default `30`, `0` = forever) |
 
 All API keys and tokens live only in the gitignored `.env*` files (`.env`, `.env.local`, `.env.model`, `.env.secrets`) — never commit real credentials.
 
 ## Terminal Commands
 
-Once running, type a message to chat with Mimar, or use a command. `/help` prints everything below.
+Once running, type a message to chat with Ethgent, or use a command. `/help` prints everything below.
 
 | Command | Description |
 |---|---|
@@ -163,13 +163,13 @@ The code is compiled, checked for a function named after the tool, and actually 
 
 ## Operations: logs, run history, usage
 
-Everything is stored in `workspace/runtime/telemetry.sqlite` (gitignored) and kept for `MIMAR_TELEMETRY_RETENTION_DAYS` days.
+Everything is stored in `workspace/runtime/telemetry.sqlite` (gitignored) and kept for `ETHGENT_TELEMETRY_RETENTION_DAYS` days.
 
 - **Logs** survive restarts (`/logs`).
 - **Runs** record every chat turn and heartbeat job — including skipped ones and retry attempts — with status, duration, error and a summary of the output (`/runs`, `/run`, `/heartbeat log`). The heartbeat's own `job_runtime` table only keeps the *last* run per job; this keeps them all.
 - **Usage** records the tokens of every LLM call, attributed to the run, agent, model and channel it happened in (`/usage`).
 
-Cost is estimated only for models you price in `config/pricing.yaml` (USD per 1M tokens); Mimar ships no prices because they change and model names are install-specific:
+Cost is estimated only for models you price in `config/pricing.yaml` (USD per 1M tokens); Ethgent ships no prices because they change and model names are install-specific:
 
 ```yaml
 models:
@@ -191,25 +191,25 @@ Send `/id` (Telegram) or `!id` (Discord) to the bot to learn your numeric ID. Un
 
 Management commands are `/agent`, `/tool`, `/heartbeat`, `/usage`, … on Telegram and `!agent`, `!tool`, … on Discord. Even for an admin, remote sessions cannot run `/tool create|edit|delete` or `/tool show --code` (tool code runs on the server), `/agent pack …` (filesystem paths) or `/agent create --builtin`, and `agent delete` / `heartbeat remove` require `--yes`.
 
-## Using Mimar as an Embedded Agent
+## Using Ethgent as an Embedded Agent
 
-`MarketingApp/agent_api.py` exposes a thin, side-effect-free API for calling Mimar from another orchestrator (e.g. an asset-generation pipeline) instead of running it as a standalone terminal app:
+`MarketingApp/agent_api.py` exposes a thin, side-effect-free API for calling Ethgent from another orchestrator (e.g. an asset-generation pipeline) instead of running it as a standalone terminal app:
 
 ```python
-from MarketingApp.agent_api import MimarAgent
+from MarketingApp.agent_api import EthgentAgent
 
-agent = MimarAgent(workspace_dir="/path/to/pool/brandX/workspace")
+agent = EthgentAgent(workspace_dir="/path/to/pool/brandX/workspace")
 result = await agent.run("Draft a post about today's topic for X")
 print(result.text)
 ```
 
-`MimarAgent` never starts the heartbeat/Telegram/Discord background tasks. Workspace and config directories can be redirected per instance via `workspace_dir`/`config_dir` (see the module docstring for the single-process-per-workspace caveat).
+`EthgentAgent` never starts the heartbeat/Telegram/Discord background tasks. Workspace and config directories can be redirected per instance via `workspace_dir`/`config_dir` (see the module docstring for the single-process-per-workspace caveat).
 
 ## Project Structure
 
 ```
 MarketingApp/
-├── agent_api.py         # Embeddable agent wrapper (MimarAgent)
+├── agent_api.py         # Embeddable agent wrapper (EthgentAgent)
 ├── paths.py              # Central, overridable workspace/config path resolution
 ├── main.py               # Entry point (python -m MarketingApp.main)
 ├── telemetry.py           # Persistent logs, run history and token usage

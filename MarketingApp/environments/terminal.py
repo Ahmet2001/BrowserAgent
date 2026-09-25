@@ -1,4 +1,4 @@
-"""Mimar icin interaktif terminal yonetim arayuzu."""
+"""Ethgent icin interaktif terminal yonetim arayuzu."""
 
 from __future__ import annotations
 
@@ -137,7 +137,7 @@ class TerminalManager:
         model = getattr(self.base_model, "model", "bilinmiyor")
         provider = getattr(self.base_model, "provider_name", "bilinmiyor")
         self._emit("")
-        self._emit(self._color("MIMAR TERMINAL", "bold"))
+        self._emit(self._color("ETHGENT TERMINAL", "bold"))
         self._emit(f"Model: {model} | Saglayici: {provider}")
         self._emit(
             f"Telegram: {'aktif' if self.telegram_enabled else 'kapali'} | "
@@ -162,7 +162,7 @@ class TerminalManager:
         args = parts[1:]
 
         if command in {"/exit", "/quit", "/q"}:
-            self._emit("Mimar kapatiliyor...")
+            self._emit("Ethgent kapatiliyor...")
             return False
         if command in {"/help", "/?"}:
             self._print_help()
@@ -288,7 +288,7 @@ Ornekler
   /agent pack export kripto_paketim --agents kripto_ajani --out ~/paketim
   /heartbeat add --cron "*/30" --gorev "Market snapshot al" --name "Market"
 
-Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
+Slash ile baslamayan her satir Ethgent'e mesaj olarak gonderilir.
 """.strip()
         )
 
@@ -1581,7 +1581,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             return
         self._emit(self._color(f"Sohbet gecmisi ({len(self.history)})", "bold"))
         for item in self.history:
-            label = "Sen" if item.get("role") == "user" else "Mimar"
+            label = "Sen" if item.get("role") == "user" else "Ethgent"
             self._emit(f"  {item.get('time', '--:--')} {label}: {item.get('content', '')}")
 
     def _clear_history(self) -> None:
@@ -1759,7 +1759,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
 
         context = self._build_context()
         self._add_history("user", user_text)
-        self._emit(self._color("Mimar dusunuyor...", "yellow"))
+        self._emit(self._color("Ethgent dusunuyor...", "yellow"))
 
         async def on_direct_text(text: str):
             cleaned = (text or "").strip()
@@ -1776,7 +1776,7 @@ Slash ile baslamayan her satir Mimar'a mesaj olarak gonderilir.
             answer = self._extract_result_text(result)
             self._add_history("assistant", answer)
             self._emit("")
-            self._emit(self._color("Mimar>", "green"))
+            self._emit(self._color("Ethgent>", "green"))
             self._emit(answer)
             self._emit("")
         except Exception as exc:

@@ -230,7 +230,7 @@ async def run_discord_bot(token: str, base_model=None):
         submodels = list_submodels()
         sm_list = "\n".join([f"• `{name}` — {desc[:60]}..." for name, desc in submodels.items()])
         await ctx.send(
-            f"🤖 **Mimar AI — Discord**\n\n"
+            f"🤖 **Ethgent AI — Discord**\n\n"
             f"**Uzman Ajanlar:**\n{sm_list}\n\n"
             f"💡 Doğal dille mesaj yazarak her şeyi yapabilirsiniz!\n"
             f"**Komutlar:** `!durum` `!yardim`"
