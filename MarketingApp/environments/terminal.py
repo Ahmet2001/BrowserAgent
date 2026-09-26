@@ -49,6 +49,20 @@ def _studio():
     return agent_studio
 
 
+def _runtime_config():
+    """runtime_config'i tembel yukle; import aninda llms paketini ayaga kaldirmamak icin."""
+    from MarketingApp.llms import runtime_config
+
+    return runtime_config
+
+
+def _bellek():
+    """bellek_araclari'ni tembel yukle; import aninda araclar paketini ayaga kaldirmamak icin."""
+    from MarketingApp.araclar import bellek_araclari
+
+    return bellek_araclari
+
+
 _HISTORY_FILE = workspace_path(".system", "terminal_chat_history.json")
 _MAX_HISTORY = 30
 _MAX_CONTEXT_MESSAGES = 12
@@ -194,6 +208,10 @@ class TerminalManager:
             self._reload_agents()
         elif command == "/heartbeat":
             await self._manage_heartbeat(args)
+        elif command == "/provider":
+            self._manage_provider(args)
+        elif command == "/memory":
+            self._manage_memory(args)
         else:
             self._emit(self._color(f"Bilinmeyen komut: {command}. /help ile listeyi gorebilirsin.", "yellow"))
         return True
@@ -243,6 +261,11 @@ Komutlar
   /heartbeat on|off               Heartbeat config'ini aktif/pasif yap
   /heartbeat reload               Config'i diskten yeniden yukle
   /reload                         Ajan ve custom tool config'ini yenile
+  /provider                       Aktif provider/model ve pinlenmis ajanlari goster
+  /provider set <ad> [bayrak]     Provider/model degistir (.env.model'e yazar)
+  /memory [kategori] [anahtar]    Uzun vadeli bellegi goster
+  /memory search <metin>          Bellekte metin ara
+  /memory delete <kategori> <anahtar> [--yes]   Bellekten bir kayit sil
   /history                        Terminal sohbet gecmisini goster
   /clear                          Terminal sohbet gecmisini temizle
   /exit                           Uygulamayi guvenli sekilde kapat
@@ -274,6 +297,15 @@ Custom tool bayraklari
   --all                     Dosyadaki '_' ile baslamayan tum fonksiyonlari kaydet
   --overwrite               Var olan tool kayitlarinin uzerine yaz (toplu kayit)
 
+Provider bayraklari (/provider set icin)
+  --base-model M             BASE_MODEL_NAME
+  --submodel-model M         SUBMODEL_MODEL_NAME
+  --browser-model M          BROWSER_AGENT_MODEL
+  --base-url URL             OPENAI_COMPAT_BASE_URL (OpenAI-uyumlu endpoint)
+  --api-key K                Yeni provider'in API anahtari (gemini->GEMINI_API_KEY, digerleri->MOONSHOT_API_KEY)
+  --reset-pins                agents.yaml'daki somut model isimlerini default sentinaline sifirla
+  --dry-run                   Kaydetmeden neyin degisecegini goster
+
 NOT: config tipi ajanlar varsayilan tool setini almaz; tool vermezsen ajan
 tool'suz calisir. Varsayilan set fallback'i sadece builtin ajanlarda vardir.
 
@@ -287,6 +319,8 @@ Ornekler
   /tool create --file ~/kripto.py --names fiyat_getir,hacim_getir
   /agent pack export kripto_paketim --agents kripto_ajani --out ~/paketim
   /heartbeat add --cron "*/30" --gorev "Market snapshot al" --name "Market"
+  /provider set deepseek --base-url https://api.deepseek.com --base-model deepseek-chat --reset-pins
+  /memory search "ton"
 
 Slash ile baslamayan her satir Ethgent'e mesaj olarak gonderilir.
 """.strip()
@@ -1598,6 +1632,169 @@ Slash ile baslamayan her satir Ethgent'e mesaj olarak gonderilir.
                 "green",
             )
         )
+
+    _MODEL_SENTINELS = {"default", "base_default", "browser_default"}
+
+    def _pinned_agents(self) -> list[tuple[str, str]]:
+        """agents.yaml'da somut (sentinel olmayan) model adi tasiyan ajanlar.
+
+        Bunlar provider/model env degiskenlerini degistirmenin ETKILEMEDIGI
+        ajanlardir; cunku BaseModel sadece "default"/"base_default"/"browser_default"
+        degerlerini env'den yeniden cozer (bkz. BaseModel.py:171-173).
+        """
+        agents = _studio().load_agents_config()["agents"]
+        return [
+            (agent["name"], agent.get("model"))
+            for agent in agents
+            if str(agent.get("model") or "").strip() not in self._MODEL_SENTINELS
+        ]
+
+    def _manage_provider(self, args: list[str]) -> None:
+        if not args or args[0].lower() == "show":
+            self._print_provider_status()
+            return
+        sub = args[0].lower()
+        if sub == "set":
+            self._set_provider(args[1:])
+            return
+        self._emit(self._color(f"Bilinmeyen /provider komutu: {sub}. Kullanim: /provider [show] | /provider set <ad> [bayrak]", "red"))
+
+    def _print_provider_status(self) -> None:
+        rc = _runtime_config()
+        self._emit(self._color("Provider", "bold"))
+        self._emit(f"  Provider        : {rc.get_provider_display_name()} ({rc.get_model_provider()})")
+        self._emit(f"  Base URL        : {rc.get_openai_compat_base_url()}")
+        self._emit(f"  BASE_MODEL_NAME     : {rc.get_base_model_name()}")
+        self._emit(f"  SUBMODEL_MODEL_NAME : {rc.get_submodel_model_name()}")
+        self._emit(f"  BROWSER_AGENT_MODEL : {rc.get_browser_model_name()}")
+        self._emit(f"  API anahtari    : {'tanimli' if rc.get_model_api_key() else self._color('TANIMSIZ', 'yellow')}")
+
+        pinned = self._pinned_agents()
+        if pinned:
+            self._emit(self._color(f"\n{len(pinned)} ajan somut model adina pinlenmis (provider/model env degisince TAKIP ETMEZ):", "yellow"))
+            for name, model in pinned:
+                self._emit(f"  - {name}: {model}")
+            self._emit("  /provider set ... --reset-pins ile default'a sifirlanabilir.")
+        else:
+            self._emit(self._color("\nTum ajanlar default sentinel'ini kullaniyor; provider degisince hepsi takip eder.", "green"))
+
+    def _set_provider(self, args: list[str]) -> None:
+        try:
+            positional, flags = self._parse_flags(args, bool_flags={"dry_run", "reset_pins"})
+        except ValueError as exc:
+            self._emit(self._color(str(exc), "red"))
+            return
+        if len(positional) != 1:
+            self._emit('Kullanim: /provider set <ad> [--base-model M] [--submodel-model M] [--browser-model M] [--base-url URL] [--api-key K] [--reset-pins] [--dry-run]')
+            return
+
+        provider_name = positional[0].strip().lower()
+        if not provider_name:
+            self._emit(self._color("Provider adi bos olamaz.", "red"))
+            return
+
+        env_vars: dict[str, str] = {"MODEL_PROVIDER": provider_name}
+        if "base_model" in flags:
+            env_vars["BASE_MODEL_NAME"] = flags["base_model"]
+        if "submodel_model" in flags:
+            env_vars["SUBMODEL_MODEL_NAME"] = flags["submodel_model"]
+        if "browser_model" in flags:
+            env_vars["BROWSER_AGENT_MODEL"] = flags["browser_model"]
+        if "base_url" in flags:
+            env_vars["OPENAI_COMPAT_BASE_URL"] = flags["base_url"]
+        if "api_key" in flags:
+            key_name = "GEMINI_API_KEY" if provider_name == "gemini" else "MOONSHOT_API_KEY"
+            env_vars[key_name] = flags["api_key"]
+
+        reset_pins = bool(flags.get("reset_pins"))
+        pinned = self._pinned_agents() if reset_pins else []
+
+        if flags.get("dry_run"):
+            self._emit(self._color("[dry-run] Kaydedilmedi. Yazilacak env degiskenleri:", "yellow"))
+            for key, value in env_vars.items():
+                shown = "***" if "KEY" in key else value
+                self._emit(f"  {key}={shown}")
+            if reset_pins:
+                if pinned:
+                    self._emit(self._color(f"{len(pinned)} ajanin model pini 'default'a sifirlanacak:", "yellow"))
+                    for name, model in pinned:
+                        self._emit(f"  - {name}: {model} -> default")
+                else:
+                    self._emit("Sifirlanacak pinlenmis ajan yok.")
+            return
+
+        updated = _studio().update_model_env_vars(env_vars)
+        self._emit(self._color(f"Yazildi ({len(updated)} degisken): {', '.join(updated)}", "green"))
+
+        if reset_pins and pinned:
+            config = _studio().load_agents_config()
+            for agent in config["agents"]:
+                if str(agent.get("model") or "").strip() in self._MODEL_SENTINELS:
+                    continue
+                agent["model"] = "browser_default" if agent.get("name") == "browser_agent" else "default"
+            _studio().save_agents_config(config["agents"], config.get("global_disabled_tools"))
+            self._emit(self._color(f"{len(pinned)} ajanin model pini 'default'a sifirlandi.", "green"))
+
+        self._reload_agents()
+        self._emit(
+            self._color(
+                "NOT: model adi degisikligi hemen etkili oldu. Ancak base_url/API anahtari "
+                "degisikligi (gercek provider degisimi) mevcut oturumdaki HTTP client'lari "
+                "yeniden olusturmaz -- tam etkisi icin uygulamayi yeniden baslat.",
+                "yellow",
+            )
+        )
+
+    def _manage_memory(self, args: list[str]) -> None:
+        bellek = _bellek()
+        if not args:
+            self._emit(bellek.bellek_oku())
+            return
+        sub = args[0].lower()
+        if sub == "show" and len(args) == 1:
+            self._emit(bellek.bellek_oku())
+            return
+        if sub == "search":
+            if len(args) != 2:
+                self._emit('Kullanim: /memory search <metin>')
+                return
+            self._print_memory_search(args[1])
+            return
+        if sub == "delete":
+            if len(args) not in (3, 4) or (len(args) == 4 and args[3] != "--yes"):
+                self._emit('Kullanim: /memory delete <kategori> <anahtar> --yes')
+                return
+            if len(args) != 4:
+                self._emit(self._color("Bellek kalici siliniyor; onaylamak icin --yes ekle.", "yellow"))
+                return
+            self._emit(bellek.bellek_sil(args[1], args[2]))
+            return
+        # /memory <kategori> [anahtar] kisayolu
+        self._emit(bellek.bellek_oku(sub, args[1] if len(args) > 1 else ""))
+
+    def _print_memory_search(self, query: str) -> None:
+        bellek = _bellek()
+        data = bellek.bellek_raw()
+        needle = query.strip().lower()
+        hits: list[str] = []
+        for kategori, icerik in data.items():
+            if isinstance(icerik, dict):
+                for k, v in icerik.items():
+                    val = v.get("deger") if isinstance(v, dict) else v
+                    if needle in k.lower() or needle in str(val).lower():
+                        hits.append(f"[{kategori}] {k}: {val}")
+            elif isinstance(icerik, list):
+                for item in icerik:
+                    k = item.get("anahtar", "")
+                    val = item.get("deger", "")
+                    if needle in k.lower() or needle in str(val).lower():
+                        hits.append(f"[{kategori}] {k}: {val}")
+        if not hits:
+            self._emit(f"'{query}' icin bellekte sonuc bulunamadi.")
+            return
+        self._emit(self._color(f"{len(hits)} sonuc:", "bold"))
+        for hit in hits:
+            self._emit(f"  • {hit}")
 
     async def _manage_heartbeat(self, args: list[str]) -> None:
         if not args:

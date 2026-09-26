@@ -137,9 +137,14 @@ Once running, type a message to chat with Ethgent, or use a command. `/help` pri
 | `/usage [--since 24h] [--by agent\|model\|source\|day\|run]` | LLM token usage, plus a cost estimate if `config/pricing.yaml` exists |
 | `/errors [text]` | Config problems that were previously collected but never shown |
 | `/reload` | Reload agent/custom tool config |
+| `/provider` | Show the active provider/model and which agents have a literal (non-default) model pinned in `agents.yaml` |
+| `/provider set <name> [--base-model M] [--submodel-model M] [--browser-model M] [--base-url URL] [--api-key K] [--reset-pins] [--dry-run]` | Switch provider/model, writing to `.env.model`; `--reset-pins` un-pins agents back to the `default` sentinel so they follow the new provider |
+| `/memory [category] [key]`, `/memory search <text>`, `/memory delete <category> <key> --yes` | Inspect, search and remove entries from the agent's long-term memory (`bellek_yaz`/`bellek_oku`) without going through chat |
 | `/history`, `/clear`, `/exit` | Chat history / shut down |
 
 Destructive commands ask for confirmation unless you pass `--yes`. `--dry-run` on `agent create/edit` and `heartbeat add` previews the result without saving.
+
+**Switching providers:** each agent's `model:` field in `agents.yaml` is normally the sentinel `default` (or `browser_default`), which is re-resolved from `SUBMODEL_MODEL_NAME`/`BROWSER_AGENT_MODEL` on every boot. If an agent has ever been given an explicit `--model` (via `/agent create`/`edit`/`copy`), that literal name is pinned and does **not** follow a later `/provider set` — use `--reset-pins` to un-pin it. Also note that model *name* changes take effect immediately via `/reload`, but a provider swap (`--base-url`/`--api-key`) only fully applies after restarting the app, since the underlying HTTP clients are built once at boot.
 
 ### Custom tools
 
