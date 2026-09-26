@@ -212,6 +212,8 @@ class TerminalManager:
             self._manage_provider(args)
         elif command == "/memory":
             self._manage_memory(args)
+        elif command == "/prompt":
+            self._manage_prompt(args)
         else:
             self._emit(self._color(f"Bilinmeyen komut: {command}. /help ile listeyi gorebilirsin.", "yellow"))
         return True
@@ -266,6 +268,10 @@ Komutlar
   /memory [kategori] [anahtar]    Uzun vadeli bellegi goster
   /memory search <metin>          Bellekte metin ara
   /memory delete <kategori> <anahtar> [--yes]   Bellekten bir kayit sil
+  /prompt                         Orkestratorun aktif system prompt'unu goster (ozel mi, varsayilan mi)
+  /prompt default                 Kod icindeki varsayilan orkestrator promptunu goster
+  /prompt set "..."               Orkestrator promptunu degistir (config/orchestrator_prompt.md)
+  /prompt reset                   Ozel promptu sil, varsayilana don
   /history                        Terminal sohbet gecmisini goster
   /clear                          Terminal sohbet gecmisini temizle
   /exit                           Uygulamayi guvenli sekilde kapat
@@ -302,7 +308,7 @@ Provider bayraklari (/provider set icin)
   --submodel-model M         SUBMODEL_MODEL_NAME
   --browser-model M          BROWSER_AGENT_MODEL
   --base-url URL             OPENAI_COMPAT_BASE_URL (OpenAI-uyumlu endpoint)
-  --api-key K                Yeni provider'in API anahtari (gemini->GEMINI_API_KEY, digerleri->MOONSHOT_API_KEY)
+  --api-key K                Yeni provider'in API anahtari (gemini->GEMINI_API_KEY, moonshot->MOONSHOT_API_KEY, digerleri->{PROVIDER}_API_KEY)
   --reset-pins                agents.yaml'daki somut model isimlerini default sentinaline sifirla
   --dry-run                   Kaydetmeden neyin degisecegini goster
 
@@ -1703,8 +1709,7 @@ Slash ile baslamayan her satir Ethgent'e mesaj olarak gonderilir.
         if "base_url" in flags:
             env_vars["OPENAI_COMPAT_BASE_URL"] = flags["base_url"]
         if "api_key" in flags:
-            key_name = "GEMINI_API_KEY" if provider_name == "gemini" else "MOONSHOT_API_KEY"
-            env_vars[key_name] = flags["api_key"]
+            env_vars[_runtime_config().provider_api_key_env_name(provider_name)] = flags["api_key"]
 
         reset_pins = bool(flags.get("reset_pins"))
         pinned = self._pinned_agents() if reset_pins else []
@@ -1795,6 +1800,42 @@ Slash ile baslamayan her satir Ethgent'e mesaj olarak gonderilir.
         self._emit(self._color(f"{len(hits)} sonuc:", "bold"))
         for hit in hits:
             self._emit(f"  • {hit}")
+
+    def _default_orchestrator_prompt(self) -> str:
+        getter = getattr(self.base_model, "default_system_instruction", None)
+        return getter() if callable(getter) else ""
+
+    def _manage_prompt(self, args: list[str]) -> None:
+        if not args or args[0].lower() == "show":
+            self._print_prompt_status()
+            return
+        sub = args[0].lower()
+        if sub == "default":
+            self._emit(self._color("Varsayilan orkestrator promptu (kod icinde, SYSTEM_INSTRUCTION):", "bold"))
+            self._emit(self._default_orchestrator_prompt())
+            return
+        if sub == "set":
+            if len(args) != 2 or not args[1].strip():
+                self._emit('Kullanim: /prompt set "yeni prompt metni"')
+                return
+            _studio().write_orchestrator_prompt(args[1])
+            self._emit(self._color("Orkestrator promptu guncellendi; bir sonraki mesajda hemen etkili olur.", "green"))
+            return
+        if sub == "reset":
+            _studio().write_orchestrator_prompt("")
+            self._emit(self._color("Orkestrator promptu varsayilana sifirlandi.", "green"))
+            return
+        self._emit(self._color(f"Bilinmeyen /prompt komutu: {sub}. Kullanim: /prompt [show|default|set \"...\"|reset]", "red"))
+
+    def _print_prompt_status(self) -> None:
+        override = _studio().read_orchestrator_prompt()
+        if override:
+            self._emit(self._color("Orkestrator promptu: OZEL (config/orchestrator_prompt.md)", "bold"))
+            self._emit(override)
+        else:
+            self._emit(self._color("Orkestrator promptu: VARSAYILAN (kod icinde)", "bold"))
+            self._emit(self._default_orchestrator_prompt())
+        self._emit(self._color("\n/prompt default ile varsayilani, /prompt set \"...\" ile ozellestirilmisini gorebilirsin.", "yellow"))
 
     async def _manage_heartbeat(self, args: list[str]) -> None:
         if not args:

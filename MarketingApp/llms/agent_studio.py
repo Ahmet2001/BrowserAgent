@@ -34,6 +34,7 @@ SUBMODELS_INIT_PATH = SUBMODELS_DIR / "__init__.py"
 AGENTS_CONFIG_PATH = CONFIG_DIR / "agents.yaml"
 CUSTOM_TOOLS_CONFIG_PATH = CONFIG_DIR / "custom_tools.yaml"
 AGENT_PACKS_CONFIG_PATH = CONFIG_DIR / "agent_packs.yaml"
+ORCHESTRATOR_PROMPT_PATH = CONFIG_DIR / "orchestrator_prompt.md"
 MODEL_ENV_PATH = APP_DIR.parent / ".env.model"
 
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
@@ -225,6 +226,28 @@ def ensure_agent_studio_files() -> None:
         _write_yaml(CUSTOM_TOOLS_CONFIG_PATH, _default_custom_tools_config())
     if not AGENT_PACKS_CONFIG_PATH.exists():
         _write_yaml(AGENT_PACKS_CONFIG_PATH, _default_agent_packs_config())
+
+
+def read_orchestrator_prompt() -> str:
+    """Orkestratorun (BaseModel) system prompt override'ini okur; yoksa bos dondurur.
+
+    Ayri bir dosyada tutulur (agents.yaml'in icinde degil) cunku save_agents_config()
+    her ajan duzenlemesinde tum dosyayi yeniden yazar -- oraya eklenen bir alan,
+    onu bilmeyen onlarca cagri noktasi tarafindan sessizce silinirdi.
+    """
+    if not ORCHESTRATOR_PROMPT_PATH.exists():
+        return ""
+    return ORCHESTRATOR_PROMPT_PATH.read_text(encoding="utf-8").strip()
+
+
+def write_orchestrator_prompt(text: str) -> None:
+    """Orkestrator prompt override'ini yazar; bos metin verilirse varsayilana doner (dosyayi siler)."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        ORCHESTRATOR_PROMPT_PATH.unlink(missing_ok=True)
+        return
+    ORCHESTRATOR_PROMPT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ORCHESTRATOR_PROMPT_PATH.write_text(cleaned, encoding="utf-8")
 
 
 def validate_agent_name(name: str) -> str:
