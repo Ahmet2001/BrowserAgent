@@ -245,10 +245,14 @@ class PackTests(TerminalCase):
         self.assertNotIn("hunter2", blob)
         self.assertEqual((pack / "env.example").read_text(encoding="utf-8").strip(), "SUPER_SECRET=")
 
-    async def test_export_refuses_builtins_and_overwrites(self):
-        self.assertIn("builtin tipinde ve paketlenemez", await self.run_cmd("/agent pack export paket_a --agents sistem_agent"))
+    async def test_export_refuses_builtin_tools_but_allows_builtin_agents(self):
         self.assertIn("hazir bir builtin tool", await self.run_cmd("/agent pack export paket_b --tools workspace_yaz"))
         self.assertIn("Kullanim", await self.run_cmd("/agent pack export"))
+        pack = ROOT / "cikti" / "sistem_paketi"
+        out = await self.run_cmd(f"/agent pack export sistem_paketi --agents sistem_agent --out {pack}")
+        self.assertIn("Pack olusturuldu", out)
+        self.assertTrue((pack / "agents/sistem_agent.yaml").exists())
+        self.assertFalse((pack / "submodels").exists())  # orijinal builtin: kaynak gomulmez
         await self._build_setup()
         pack = ROOT / "cikti" / "tekrar"
         await self.run_cmd(f"/agent pack export tekrar_paket --agents kripto_ajani --out {pack}")
@@ -260,6 +264,65 @@ class PackTests(TerminalCase):
         pack = ROOT / "cikti" / "eksik"
         out = await self.run_cmd(f"/agent pack export eksik_paket --agents kripto_ajani --tools fiyat_getir --out {pack}")
         self.assertIn("pakete alinmadi: hacim_getir", out)
+
+    async def test_export_and_install_a_scaffolded_builtin_onto_a_clean_setup(self):
+        from MarketingApp.llms.SubModels import base as submodel_base
+
+        init_path = studio().SUBMODELS_INIT_PATH
+        original_init = init_path.read_text(encoding="utf-8")
+        scaffold_path = studio()._builtin_module_path("ozel_ajanim")
+
+        def cleanup():
+            scaffold_path.unlink(missing_ok=True)
+            init_path.write_text(original_init, encoding="utf-8")
+            sys.modules.pop("MarketingApp.llms.SubModels.ozel_ajanim", None)
+            submodel_base._SUBMODEL_REGISTRY.pop("ozel_ajanim", None)
+
+        self.addCleanup(cleanup)
+
+        await self.run_cmd('/agent create ozel_ajanim --builtin --desc "Ozel builtin" --prompt "Sen ozel bir ajansin."')
+        self.assertTrue(scaffold_path.exists())
+
+        pack = ROOT / "cikti" / "ozel_paket"
+        out = await self.run_cmd(f"/agent pack export ozel_paket --agents ozel_ajanim --out {pack}")
+        self.assertIn("Pack olusturuldu", out)
+        self.assertTrue((pack / "submodels/ozel_ajanim.py").exists())
+
+        # "temiz makine" simulasyonu: config'i VE scaffold dosyasini/import'unu tamamen sil
+        S.reset_state()
+        scaffold_path.unlink()
+        init_path.write_text(original_init, encoding="utf-8")
+        sys.modules.pop("MarketingApp.llms.SubModels.ozel_ajanim", None)
+        submodel_base._SUBMODEL_REGISTRY.pop("ozel_ajanim", None)
+        self.assertIsNone(agent_entry("ozel_ajanim"))
+
+        out = await self.run_cmd(f"/agent pack install {pack} --yes")
+        self.assertIn("Pack kuruldu", out)
+        self.assertTrue(scaffold_path.exists())
+        self.assertIn("ozel_ajanim", init_path.read_text(encoding="utf-8"))
+        agent = agent_entry("ozel_ajanim")
+        self.assertEqual(agent["type"], "builtin")
+        self.assertEqual(agent["description"], "Ozel builtin")
+        self.assertIn("ozel_ajanim", submodel_base._SUBMODEL_REGISTRY)
+
+    async def test_export_and_install_config_overlay_for_a_shipped_builtin(self):
+        await self.run_cmd('/agent edit content_creator_agent --model gemma-test-model --prompt "Ozel marka sesi."')
+        pack = ROOT / "cikti" / "marka_paketi"
+        out = await self.run_cmd(f"/agent pack export marka_paketi --agents content_creator_agent --out {pack}")
+        self.assertIn("Pack olusturuldu", out)
+        self.assertFalse((pack / "submodels").exists())
+        self.assertIn("gomulu bir builtin", out)
+
+        S.reset_state()  # content_creator_agent varsayilana doner: model=default, prompt=''
+        self.assertEqual(agent_entry("content_creator_agent")["model"], "default")
+
+        # sevk edilen builtin'ler agents.yaml'da HER ZAMAN varsayilan haliyle onceden var;
+        # overlay uygulamak icin --overwrite gerekir.
+        out = await self.run_cmd(f"/agent pack install {pack} --yes --overwrite")
+        self.assertIn("Pack kuruldu", out)
+        agent = agent_entry("content_creator_agent")
+        self.assertEqual(agent["model"], "gemma-test-model")
+        self.assertEqual(agent["system_prompt"].strip(), "Ozel marka sesi.")
 
     async def test_preview_and_list(self):
         example = REPO / "MarketingApp" / "workspace" / "agent_packs" / "ornek_haber_bundle"

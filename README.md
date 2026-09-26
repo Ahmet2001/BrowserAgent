@@ -164,7 +164,7 @@ The code is compiled, checked for a function named after the tool, and actually 
 /agent pack install ~/my_pack
 ```
 
-`export` writes `plugin.yaml`, `agents/`, `prompts/`, `tools/`, a README and an `env.example` that contains variable **names only** — never values. Builtin agents and builtin tools cannot be packaged (`/agent copy` makes a config copy you can).
+`export` writes `plugin.yaml`, `agents/`, `prompts/`, `tools/`, a README and an `env.example` that contains variable **names only** — never values. Builtin tools cannot be packaged (they already exist in every install). Builtin agents *can* be packaged: one you scaffolded yourself (`/agent create --builtin`) travels with its own `submodels/<name>.py` source and installs even where it doesn't exist yet; one of the six agents the app ships with (`sosyal_medya_agent`, `content_creator_agent`, …) travels as config only — model/tools/prompt — since the target install already has its code.
 
 ## Operations: logs, run history, usage
 
