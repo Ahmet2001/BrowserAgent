@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/ethgent-cover.webp" alt="Ethgent - AI-powered multi-agent automation orchestrator" width="800" />
+</p>
+
 # Ethgent
 
 **AI-powered social media management, content creation, and browser automation orchestrator.**
