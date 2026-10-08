@@ -244,7 +244,21 @@ class BaseModel:
             return bool(self.active_agents.get(name, False)) and bool(self.active_tools.get(name, False))
         return bool(self.active_tools.get(name, True))
 
+    def default_system_instruction(self) -> str:
+        """Config override'i olmadan kullanilan, kod icindeki varsayilan orkestrator promptu."""
+        return SYSTEM_INSTRUCTION.strip()
+
     def _build_runtime_system_instruction(self) -> str:
+        from .agent_studio import read_orchestrator_prompt
+
+        base_instruction = SYSTEM_INSTRUCTION
+        try:
+            override = read_orchestrator_prompt()
+            if override:
+                base_instruction = override
+        except Exception:
+            pass
+
         active_rules = []
         inactive_names = []
 
@@ -274,7 +288,7 @@ class BaseModel:
                 + "\n".join(f"- `{name}` pasif; bu ismi tool/ajan olarak cagirma." for name in inactive_names)
             )
 
-        return SYSTEM_INSTRUCTION.rstrip() + "\n" + routing_block + "\n"
+        return base_instruction.rstrip() + "\n" + routing_block + "\n"
 
     def reload_agent_studio(self) -> dict:
         self._configure_agent_runtime()

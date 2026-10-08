@@ -108,6 +108,9 @@ class FakeBase:
     def log_message(self, type_, message):
         self.logs.append({"time": "00:00:00", "type": type_, "message": message})
 
+    def default_system_instruction(self):
+        return "FAKE VARSAYILAN ORKESTRATOR PROMPTU"
+
 
 class Term:
     """TerminalManager'i sarar; her komutun ciktisini dondurur."""

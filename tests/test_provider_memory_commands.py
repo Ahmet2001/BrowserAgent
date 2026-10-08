@@ -1,4 +1,5 @@
-"""Terminal komutlari: /provider (provider/model degistirme) ve /memory (uzun vadeli bellek)."""
+"""Terminal komutlari: /provider (provider/model degistirme), /memory (uzun vadeli bellek)
+ve /prompt (orkestratorun system prompt override'i)."""
 
 import _env  # noqa: F401  (her seyden once)
 
@@ -26,12 +27,6 @@ def agent_entry(name):
     return next((a for a in studio().load_agents_config()["agents"] if a["name"] == name), None)
 
 
-_PROVIDER_ENV_KEYS = (
-    "MODEL_PROVIDER", "BASE_MODEL_NAME", "SUBMODEL_MODEL_NAME",
-    "BROWSER_AGENT_MODEL", "OPENAI_COMPAT_BASE_URL", "GEMINI_API_KEY", "MOONSHOT_API_KEY",
-)
-
-
 class TerminalCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from MarketingApp.environments import automation_runtime
@@ -46,6 +41,7 @@ class TerminalCase(unittest.IsolatedAsyncioTestCase):
         self._env_patcher = mock.patch.dict(os.environ, {}, clear=False)
         self._env_patcher.start()
         self.addCleanup(self._env_patcher.stop)
+        studio().ORCHESTRATOR_PROMPT_PATH.unlink(missing_ok=True)
         self.term = Term()
 
     async def run_cmd(self, line, term=None):
@@ -82,7 +78,7 @@ class ProviderCommandTests(TerminalCase):
         env_text = studio().MODEL_ENV_PATH.read_text(encoding="utf-8")
         self.assertIn("MODEL_PROVIDER=deepseek", env_text)
         self.assertIn("BASE_MODEL_NAME=deepseek-chat", env_text)
-        self.assertIn("MOONSHOT_API_KEY=sk-test", env_text)  # deepseek gemini degil -> moonshot slotu
+        self.assertIn("DEEPSEEK_API_KEY=sk-test", env_text)  # bilinmeyen provider -> otomatik <PROVIDER>_API_KEY
         self.assertEqual(os.environ["MODEL_PROVIDER"], "deepseek")
         self.assertIn("yeniden baslat", out)  # restart uyarisi
 
@@ -91,6 +87,16 @@ class ProviderCommandTests(TerminalCase):
         env_text = studio().MODEL_ENV_PATH.read_text(encoding="utf-8")
         self.assertIn("GEMINI_API_KEY=g-test", env_text)
         self.assertNotIn("MOONSHOT_API_KEY", env_text)
+
+    async def test_moonshot_keeps_its_historical_env_var(self):
+        await self.run_cmd("/provider set moonshot --api-key m-test")
+        env_text = studio().MODEL_ENV_PATH.read_text(encoding="utf-8")
+        self.assertIn("MOONSHOT_API_KEY=m-test", env_text)
+
+    async def test_unknown_provider_name_is_normalized_into_a_valid_env_var(self):
+        await self.run_cmd("/provider set my-cool.provider --api-key x")
+        env_text = studio().MODEL_ENV_PATH.read_text(encoding="utf-8")
+        self.assertIn("MY_COOL_PROVIDER_API_KEY=x", env_text)
 
     async def test_reset_pins_restores_default_sentinel(self):
         await self.run_cmd("/agent edit content_creator_agent --model gemma-4-26b-a4b-it")
@@ -166,6 +172,59 @@ class MemoryCommandTests(TerminalCase):
         out = await self.run_cmd("/memory delete tercihler ton --yes")
         self.assertIn("silindi", out)
         self.assertNotIn("ton", bellek().bellek_raw()["tercihler"])
+
+
+class PromptCommandTests(TerminalCase):
+    async def test_shows_default_when_no_override_exists(self):
+        out = await self.run_cmd("/prompt")
+        self.assertIn("VARSAYILAN", out)
+        self.assertIn("FAKE VARSAYILAN ORKESTRATOR PROMPTU", out)
+
+    async def test_default_subcommand_always_shows_the_hardcoded_prompt(self):
+        await self.run_cmd('/prompt set "ozel prompt"')
+        out = await self.run_cmd("/prompt default")
+        self.assertIn("FAKE VARSAYILAN ORKESTRATOR PROMPTU", out)
+        self.assertNotIn("ozel prompt", out)
+
+    async def test_set_persists_and_show_reports_it_as_custom(self):
+        out = await self.run_cmd('/prompt set "sen ozel bir orkestratorsun"')
+        self.assertIn("guncellendi", out)
+        self.assertEqual(studio().read_orchestrator_prompt(), "sen ozel bir orkestratorsun")
+
+        status = await self.run_cmd("/prompt")
+        self.assertIn("OZEL", status)
+        self.assertIn("sen ozel bir orkestratorsun", status)
+
+    async def test_reset_clears_the_override_file(self):
+        await self.run_cmd('/prompt set "gecici"')
+        self.assertTrue(studio().ORCHESTRATOR_PROMPT_PATH.exists())
+        out = await self.run_cmd("/prompt reset")
+        self.assertIn("varsayilana", out)
+        self.assertFalse(studio().ORCHESTRATOR_PROMPT_PATH.exists())
+
+    async def test_set_requires_nonempty_text(self):
+        out = await self.run_cmd("/prompt set")
+        self.assertIn("Kullanim", out)
+
+    async def test_unknown_subcommand_is_rejected(self):
+        out = await self.run_cmd("/prompt frobnicate")
+        self.assertIn("Bilinmeyen", out)
+
+    async def test_override_actually_changes_the_live_orchestrator_instruction(self):
+        """agents.yaml'a dokunmadan, BaseModel'in gercek instruction-builder'i override'i okumali."""
+        from MarketingApp.llms import BaseModel as BaseModelClass
+
+        base = BaseModelClass(api_key="k", model="m")
+        base.submodels = []
+        self.addCleanup(studio().write_orchestrator_prompt, "")
+
+        default_instruction = base._build_runtime_system_instruction()
+        self.assertIn('Sen "Ethgent" projesinin merkezi orkestratorusun.', default_instruction)
+
+        studio().write_orchestrator_prompt("Sen ozel bir gorev icin kurulmus bir botsun.")
+        custom_instruction = base._build_runtime_system_instruction()
+        self.assertIn("Sen ozel bir gorev icin kurulmus bir botsun.", custom_instruction)
+        self.assertNotIn('Sen "Ethgent" projesinin merkezi orkestratorusun.', custom_instruction)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 **AI-powered social media management, content creation, and browser automation orchestrator.**
 
-Ethgent is a Python agent platform built around a single orchestrator LLM (`BaseModel`) that delegates work to specialized sub-agents — social media, content creation, browser automation, research — each with its own tool set. It's controlled through an interactive terminal, and can also be embedded as a component ("agent leg") inside a larger system.
+Ethgent is a standalone, operable product, not a framework you assemble — clone it, run `./run.sh`, and you have a working orchestrator LLM (`BaseModel`) that delegates to specialized sub-agents (social media, content creation, browser automation, research), a terminal to manage it, and its own logs/run-history/cost tracking out of the box. Agents and tools live in YAML and can be created, edited, and shared from that terminal without touching code. (It can also be embedded as a library in another Python process when that's genuinely what you need — see [below](#using-ethgent-as-an-embedded-agent) — but that's the exception, not how Ethgent is meant to be used day to day.)
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -164,7 +164,7 @@ The code is compiled, checked for a function named after the tool, and actually 
 /agent pack install ~/my_pack
 ```
 
-`export` writes `plugin.yaml`, `agents/`, `prompts/`, `tools/`, a README and an `env.example` that contains variable **names only** — never values. Builtin agents and builtin tools cannot be packaged (`/agent copy` makes a config copy you can).
+`export` writes `plugin.yaml`, `agents/`, `prompts/`, `tools/`, a README and an `env.example` that contains variable **names only** — never values. Builtin tools cannot be packaged (they already exist in every install). Builtin agents *can* be packaged: one you scaffolded yourself (`/agent create --builtin`) travels with its own `submodels/<name>.py` source and installs even where it doesn't exist yet; one of the six agents the app ships with (`sosyal_medya_agent`, `content_creator_agent`, …) travels as config only — model/tools/prompt — since the target install already has its code.
 
 ## Operations: logs, run history, usage
 
@@ -198,7 +198,7 @@ Management commands are `/agent`, `/tool`, `/heartbeat`, `/usage`, … on Telegr
 
 ## Using Ethgent as an Embedded Agent
 
-`MarketingApp/agent_api.py` exposes a thin, side-effect-free API for calling Ethgent from another orchestrator (e.g. an asset-generation pipeline) instead of running it as a standalone terminal app:
+**This is an advanced, secondary integration path.** Ethgent's primary form is the standalone terminal app described above; nothing here changes that. `MarketingApp/agent_api.py` exists only for the narrow case where another Python orchestrator (e.g. an asset-generation pipeline) needs to call Ethgent's `BaseModel` in-process instead of running it as a separate app — no logs/run-history/telemetry UI, no bots, no terminal, just a single `run()` call:
 
 ```python
 from MarketingApp.agent_api import EthgentAgent
