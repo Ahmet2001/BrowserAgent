@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -323,6 +324,38 @@ class PackTests(TerminalCase):
         agent = agent_entry("content_creator_agent")
         self.assertEqual(agent["model"], "gemma-test-model")
         self.assertEqual(agent["system_prompt"].strip(), "Ozel marka sesi.")
+
+    async def test_github_spec_clones_then_installs_agent_and_tool(self):
+        await self._build_setup()
+        pack = ROOT / "cikti" / "gh_paket"
+        await self.run_cmd(f"/agent pack export gh_paket --agents kripto_ajani --out {pack}")
+        repo = ROOT / "uzak_repo"
+        (repo / "paketler").mkdir(parents=True)
+        subprocess.run(["cp", "-r", str(pack), str(repo / "paketler" / "gh_paket")], check=True)
+        for cmd in (["init", "-q"], ["add", "."], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"]):
+            subprocess.run(["git", "-C", str(repo), *cmd], check=True)
+
+        real_run = subprocess.run
+
+        def fake_run(cmd, *a, **kw):
+            if cmd[:2] == ["git", "clone"]:  # github URL'sini yerel depoya yonlendir
+                cmd = [*cmd[:-2], str(repo), cmd[-1]]
+            return real_run(cmd, *a, **kw)
+
+        S.reset_state()
+        self.assertIsNone(agent_entry("kripto_ajani"))
+        with unittest.mock.patch.object(studio().subprocess, "run", fake_run):
+            out = await self.run_cmd("/agent pack install github:kullanici/repo#paketler/gh_paket --yes")
+        self.assertIn("Pack kuruldu", out)
+        self.assertEqual(agent_entry("kripto_ajani")["tools"], ["fiyat_getir", "hacim_getir", "workspace_yaz"])
+        self.assertEqual(studio().load_custom_tools()["tools"]["fiyat_getir"]("ETH"), "ETH")
+        self.assertEqual(studio().load_agent_packs_config()["installed_packs"][0]["source_path"],
+                         "github:kullanici/repo#paketler/gh_paket")
+
+    async def test_github_spec_rejects_malformed_and_escaping_sources(self):
+        for bad in ("github:x", "github:a/b#../etc", "github:a/b@-oops", "github:a/b c"):
+            out = await self.run_cmd(f"/agent pack preview {bad}")
+            self.assertNotIn("Kurulabilir", out, bad)
 
     async def test_preview_and_list(self):
         example = REPO / "MarketingApp" / "workspace" / "agent_packs" / "ornek_haber_bundle"

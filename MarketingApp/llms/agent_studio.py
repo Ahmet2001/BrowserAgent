@@ -9,8 +9,11 @@ import os
 import re
 import ast
 import shutil
+import subprocess
 import sys
+import tempfile
 import types
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -877,6 +880,65 @@ def save_agent_packs_config(entries: list[dict[str, Any]]) -> None:
     _write_yaml(AGENT_PACKS_CONFIG_PATH, {"version": 1, "installed_packs": normalized})
 
 
+_GITHUB_PACK_RE = re.compile(
+    r"^(?:github:|https://github\.com/)"
+    r"(?P<owner>[A-Za-z0-9][A-Za-z0-9-]{0,38})/"
+    r"(?P<repo>[A-Za-z0-9._-]{1,100}?)(?:\.git)?"
+    r"(?:@(?P<ref>[A-Za-z0-9][A-Za-z0-9._/-]{0,99}))?"
+    r"(?:#(?P<subdir>[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}))?/?$"
+)
+GITHUB_CLONE_TIMEOUT_SECONDS = 120
+
+
+def is_github_pack_spec(value: str) -> bool:
+    text = str(value or "").strip()
+    return text.startswith("github:") or text.startswith("https://github.com/")
+
+
+@contextmanager
+def fetched_pack(path_value: str):
+    """Yield a local pack path; a github spec is shallow-cloned to a temp dir first.
+
+    Spec: github:owner/repo[@branch-or-tag][#subdir]  (or a plain https://github.com/owner/repo URL).
+    """
+    text = str(path_value or "").strip()
+    if not is_github_pack_spec(text):
+        yield text
+        return
+    match = _GITHUB_PACK_RE.match(text)
+    if not match:
+        raise AgentStudioError("GitHub kaynagi gecersiz. Format: github:kullanici/repo[@dal][#alt/klasor]")
+    subdir = match.group("subdir") or ""
+    if ".." in Path(subdir).parts:
+        raise AgentStudioError("Alt klasor '..' iceremez.")
+    if shutil.which("git") is None:
+        raise AgentStudioError("git bulunamadi; GitHub'dan pack cekmek icin git gerekli.")
+    url = f"https://github.com/{match.group('owner')}/{match.group('repo')}.git"
+    command = ["git", "clone", "--depth", "1", "--quiet"]
+    if match.group("ref"):
+        command.append(f"--branch={match.group('ref')}")
+    with tempfile.TemporaryDirectory(prefix="ethgent_pack_") as tmp:
+        dest = Path(tmp) / "repo"
+        try:
+            result = subprocess.run(
+                [*command, url, str(dest)],
+                capture_output=True,
+                text=True,
+                timeout=GITHUB_CLONE_TIMEOUT_SECONDS,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            )
+        except subprocess.TimeoutExpired:
+            raise AgentStudioError("GitHub klonlama zaman asimina ugradi.") from None
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip().splitlines()
+            raise AgentStudioError(f"GitHub'dan cekilemedi: {detail[-1] if detail else 'bilinmeyen hata'}")
+        shutil.rmtree(dest / ".git", ignore_errors=True)
+        root = (dest / subdir).resolve() if subdir else dest.resolve()
+        if dest.resolve() not in (root, *root.parents):
+            raise AgentStudioError("Alt klasor repo disina cikiyor.")
+        yield str(root)
+
+
 def _resolve_pack_root(path_value: str) -> Path:
     candidate = Path(str(path_value or "").strip()).expanduser()
     if not candidate.is_absolute():
@@ -1159,7 +1221,7 @@ def preview_agent_pack(path_value: str) -> dict[str, Any]:
     }
 
 
-def install_agent_pack(path_value: str, *, overwrite: bool = False) -> dict[str, Any]:
+def install_agent_pack(path_value: str, *, overwrite: bool = False, source_label: str | None = None) -> dict[str, Any]:
     preview = preview_agent_pack(path_value)
     if preview["errors"]:
         raise AgentStudioError("Pack preview hata verdi; kurulum yapilmadi.")
@@ -1280,7 +1342,7 @@ def install_agent_pack(path_value: str, *, overwrite: bool = False) -> dict[str,
             "version": preview["version"],
             "type": preview["type"],
             "description": preview["description"],
-            "source_path": preview["path"],
+            "source_path": source_label or preview["path"],
             "installed_path": str(installed_root),
             "installed_agents": installed_agent_names,
             "installed_tools": [item["name"] for item in preview["tools"]],

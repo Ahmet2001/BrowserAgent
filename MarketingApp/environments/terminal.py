@@ -234,6 +234,7 @@ Komutlar
   /agent pack list                Kurulu agent pack'leri listele
   /agent pack preview <yol>       Pack'i kurmadan incele
   /agent pack install <yol>       Pack kur (--overwrite, --yes)
+                                  <yol> yerine github:kullanici/repo[@dal][#alt/klasor] da olur
   /agent pack export <ad>         Kurulumunu paylasilabilir pakete cikar
   /tools [arama]                  Tool'lari listele veya filtrele
   /tools --group <ad>             Bir gruba ait tool'lari listele
@@ -730,7 +731,11 @@ Slash ile baslamayan her satir Ethgent'e mesaj olarak gonderilir.
             self._emit(f"Kullanim: /agent pack {action} <yol>" + (" [--overwrite] [--yes]" if action == "install" else ""))
             return
 
-        path_value = positional[0]
+        source = positional[0]
+        with _studio().fetched_pack(source) as path_value:
+            await self._preview_or_install_pack(action, source, path_value, flags)
+
+    async def _preview_or_install_pack(self, action: str, source: str, path_value: str, flags: dict[str, Any]) -> None:
         preview = _studio().preview_agent_pack(path_value)
         self._print_pack_preview(preview)
 
@@ -743,7 +748,8 @@ Slash ile baslamayan her satir Ethgent'e mesaj olarak gonderilir.
             self._emit("Kurulum iptal edildi.")
             return
 
-        result = _studio().install_agent_pack(path_value, overwrite=bool(flags.get("overwrite")))
+        label = source if _studio().is_github_pack_spec(source) else None
+        result = _studio().install_agent_pack(path_value, overwrite=bool(flags.get("overwrite")), source_label=label)
         pack = result["pack"]
         self._emit(self._color(f"Pack kuruldu: {pack['name']} v{pack['version']}", "green"))
         self._emit(f"  Konum: {pack['installed_path']}")
