@@ -4,9 +4,11 @@
 
 # Ethgent
 
-**AI-powered social media management, content creation, and browser automation orchestrator.**
+**A customisable LLM agent: an orchestrator, sub-agents and tools that you shape to a domain.**
 
-Ethgent is a standalone, operable product, not a framework you assemble — clone it, run `./run.sh`, and you have a working orchestrator LLM (`BaseModel`) that delegates to specialized sub-agents (social media, content creation, browser automation, research), a terminal to manage it, and its own logs/run-history/cost tracking out of the box. Agents and tools live in YAML and can be created, edited, and shared from that terminal without touching code. (It can also be embedded as a library in another Python process when that's genuinely what you need — see [below](#using-ethgent-as-an-embedded-agent) — but that's the exception, not how Ethgent is meant to be used day to day.)
+Ethgent is a standalone, operable product, not a framework you assemble: clone it, run `./run.sh`, and you have an orchestrator LLM (`BaseModel`) that delegates to specialised sub-agents, a terminal to manage it, and its own logs, run history and cost tracking. What the agent *is for* is decided by its configuration: which sub-agents exist, which tools they own, and what their prompts say. Agents and tools live in YAML and in packs, and can be created, edited, pulled from another repository and shared from the terminal without touching code.
+
+It ships tuned for **social media and content** (X, Instagram, YouTube, image and video content, browser automation, research), but that is a configuration, not its limit. See [Make it your own](#make-it-your-own). (It can also be embedded as a library in another Python process, see [below](#using-ethgent-as-an-embedded-agent), but that is the exception.)
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -16,6 +18,7 @@ Ethgent is a standalone, operable product, not a framework you assemble — clon
 ## Table of Contents
 
 - [Features](#features)
+- [Make it your own](#make-it-your-own)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
@@ -43,6 +46,36 @@ Ethgent is a standalone, operable product, not a framework you assemble — clon
 - **Interactive terminal control interface** — create, edit, copy, test and delete agents and tools, schedule heartbeat jobs, package and share a setup, review logs, approve risky actions, all from one CLI session and without a restart.
 - **Operations store** — persistent logs, per-run history (what each scheduled job did, how long it took, what it cost) and LLM token usage, queryable from the terminal.
 - **Remote management with access control** — the same management commands over Telegram/Discord for allow-listed admins only, with remote code upload deliberately blocked.
+
+## Make it your own
+
+The shipped agents are social-media ones, but the machinery is general: an agent is a prompt plus a set of tools, and tools are Python functions. To point Ethgent at another domain you add agents and tools, and switch off the ones you do not need.
+
+Two illustrations. The names are examples and the tool files are yours to write; nothing here ships with Ethgent.
+
+```
+# Trading: an agent that reads market data and keeps a journal
+/tool create --file ~/tools/prices.py --all            # get_price, get_candles, ...
+/agent create trading_agent --tools get_price,get_candles,bellek_yaz,bellek_oku \
+    --prompt "You analyse positions and write a short journal entry. Never place orders." \
+    --desc "Market data and journaling"
+
+# HR: an agent that screens and summarises applications
+/tool create --file ~/tools/applicants.py --all        # list_applicants, read_cv, ...
+/agent create hr_agent --tools list_applicants,read_cv,bellek_yaz \
+    --prompt "You summarise applications against the role description." \
+    --desc "Application screening"
+```
+
+The orchestrator then delegates to these agents the same way it does to the built-in ones. Because an agent is only reachable through its tools, giving an agent read-only tools is how you keep it read-only. A tool that changes something outside goes through the [approval gate](#approval-for-tools-that-change-something-outside).
+
+**Pulling from elsewhere.** Agents, sub-agents and tools do not have to be written locally. A pack from another repository installs with one command, after a preview and your confirmation:
+
+```
+/agent pack install github:user/repo[@branch][#sub/dir]
+```
+
+Anyone can publish a pack, so a setup built for one domain can be shared and reused. See [Sharing a setup](#sharing-a-setup). Ready-made connectors and workers that join Ethgent to an app or to platform APIs live in the separate open pool [Marketing Agent Assets](https://github.com/Ahmet2001/MarketingPool/tree/main/marketing-agent-assets); Ethgent does not require it.
 
 ## Architecture
 
