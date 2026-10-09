@@ -50,33 +50,60 @@ It ships tuned for **social media and content** (X, Instagram, YouTube, image an
 
 ## Make it your own
 
-The shipped agents are social-media ones, but the machinery is general: an agent is a prompt plus a set of tools, and tools are Python functions. To point Ethgent at another domain you add agents and tools, and switch off the ones you do not need.
+The shipped agents are social-media ones, but the machinery is general: an agent is a prompt, a model and a set of tools, and a tool is a Python function. To point Ethgent at another domain you write your tools, give an agent those tools and a prompt, try it, and, if you like, package it for others. Everything below happens in the terminal (or in `config/*.yaml`), without touching Ethgent's code. The names are illustrations; none of these tools ship with Ethgent.
 
-Two illustrations. The names are examples and the tool files are yours to write; nothing here ships with Ethgent.
+**1. Write a tool.** A tool is a plain function in a Python file. Its docstring (or the `--desc` you pass) is how the model decides when to call it, so say what it does and what it returns.
+
+```python
+# ~/tools/prices.py
+def get_price(symbol: str) -> dict:
+    """Return the latest price of a symbol, e.g. get_price("AAPL"). Read-only."""
+    ...
+    return {"symbol": symbol, "price": 123.4}
+```
 
 ```
-# Trading: an agent that reads market data and keeps a journal
-/tool create --file ~/tools/prices.py --all            # get_price, get_candles, ...
-/agent create trading_agent --tools get_price,get_candles,bellek_yaz,bellek_oku \
+/tool create --file ~/tools/prices.py --all          # every public function becomes a tool
+/tool create get_price --file ~/tools/prices.py      # or just one, named after its function
+/tool show get_price                                 # check what was registered
+```
+
+The code is compiled and imported before it is accepted, so a broken tool is rejected immediately (details in [Custom tools](#custom-tools)). Secrets it needs go in with `--env NAME=value`, which writes to the gitignored `.env.model`.
+
+**2. Give it to an agent.** Create a sub-agent that owns the tool, with its own prompt and, if you want, its own model.
+
+```
+/agent create trading_agent --tools get_price,bellek_yaz,bellek_oku \
     --prompt "You analyse positions and write a short journal entry. Never place orders." \
     --desc "Market data and journaling"
-
-# HR: an agent that screens and summarises applications
-/tool create --file ~/tools/applicants.py --all        # list_applicants, read_cv, ...
-/agent create hr_agent --tools list_applicants,read_cv,bellek_yaz \
-    --prompt "You summarise applications against the role description." \
-    --desc "Application screening"
 ```
 
-The orchestrator then delegates to these agents the same way it does to the built-in ones. Because an agent is only reachable through its tools, giving an agent read-only tools is how you keep it read-only. Tools marked as risky ask for approval in the terminal before they run.
+Change it later with `/agent edit trading_agent --add-tools get_candles --prompt "..." --model <name>`, copy it with `/agent copy`, and look at the result with `/agent show trading_agent`. The same fields live in `config/agents.yaml` (`name`, `description`, `model`, `system_prompt`, `tools`, `enabled`). The orchestrator reaches your tool only through this sub-agent, so giving the agent read-only tools is how you keep it read-only; a tool that changes something outside goes through the approval step. To change how the orchestrator itself behaves, use `/prompt set "..."` (and `/prompt reset` to go back).
 
-**Pulling from elsewhere.** Agents, sub-agents and tools do not have to be written locally. A pack from another repository installs with one command, after a preview and your confirmation:
+**3. Try it.** Run the one agent directly, before involving the orchestrator, and look at the run it recorded:
 
 ```
-/agent pack install github:user/repo[@branch][#sub/dir]
+/agent test trading_agent "What is the latest price of AAPL?"
+/runs 5
+/logs 20 --grep trading_agent
 ```
 
-Anyone can publish a pack, so a setup built for one domain can be shared and reused. See [Sharing a setup](#sharing-a-setup). Ready-made connectors and workers that join Ethgent to an app or to platform APIs live in the separate open pool [Marketing Agent Assets](https://github.com/Ahmet2001/MarketingPool/tree/main/marketing-agent-assets); Ethgent does not require it.
+When it behaves, ask the same thing in the normal chat and the orchestrator will delegate to it.
+
+**4. Package and share it.** Export the agent with its tools and prompt as a pack, put the folder in a GitHub repository, and anyone can install it:
+
+```
+/agent pack export trading_pack --agents trading_agent --out ~/trading_pack   # you
+# push ~/trading_pack to github.com/you/trading-pack                          # you
+
+/agent pack install github:you/trading-pack                                   # anyone else
+```
+
+The installer shallow-clones the repository, shows a preview of the agents and tools it would add, and asks before installing. The pack carries tool code that runs on your machine, so read the preview and install only packs you trust. The export lists environment variable **names** only, never values. More in [Sharing a setup](#sharing-a-setup).
+
+**Other domains work the same way.** An HR agent would have tools such as `list_applicants` and `read_cv`, and a prompt about screening against a role description; a support agent would have tools over a ticket system. Only the tools and the prompt change.
+
+Ready-made connectors and workers that join Ethgent to an application or to platform APIs live in the separate open pool [Marketing Agent Assets](https://github.com/Ahmet2001/MarketingPool/tree/main/marketing-agent-assets); Ethgent does not require it.
 
 ## Architecture
 
