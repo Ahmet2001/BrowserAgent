@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/ethgent-cover-vector.svg" alt="Ethgent - AI-powered multi-agent automation orchestrator" width="800" />
+  <img src="assets/ethgent-cover-spin.svg" alt="Ethgent - AI-powered multi-agent automation orchestrator" width="800" />
 </p>
 
 # Ethgent

@@ -35,6 +35,12 @@
 @keyframes pt{0%{opacity:0;transform:translateY(0)}15%{opacity:.9}100%{opacity:0;transform:translateY(-120px)}}
 .halo{transform-origin:400px 236px;animation:halo 4.5s ease-in-out infinite}
 @keyframes halo{0%,100%{opacity:.55;transform:scale(.95)}50%{opacity:1;transform:scale(1.08)}}
+.turn{transform-origin:400px 236px;animation:turn 8s linear infinite}
+@keyframes turn{0%,60%{transform:scaleX(1)}62.5%{transform:scaleX(0.866)}65%{transform:scaleX(0.5)}67.5%{transform:scaleX(.05)}70%{transform:scaleX(-0.5)}72.5%{transform:scaleX(-0.866)}75%{transform:scaleX(-1)}77.5%{transform:scaleX(-0.866)}80%{transform:scaleX(-0.5)}82.5%{transform:scaleX(.05)}85%{transform:scaleX(0.5)}87.5%{transform:scaleX(0.866)}90%{transform:scaleX(1)}100%{transform:scaleX(1)}}
+.front{animation:front 8s step-end infinite}
+@keyframes front{0%,67.4%{opacity:1}67.5%,82.4%{opacity:0}82.5%,100%{opacity:1}}
+.back{animation:back 8s step-end infinite}
+@keyframes back{0%,67.4%{opacity:0}67.5%,82.4%{opacity:1}82.5%,100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
 <rect width="800" height="450" fill="url(#bg)"/>
@@ -64,7 +70,7 @@
 <circle class="ring" cx="400" cy="232" r="70" style="animation-delay:3.4s"/>
 <g class="float"><g class="tilt">
 <circle class="halo" cx="400" cy="236" r="120" fill="url(#halo)"/>
-<line x1="400" y1="168" x2="400" y2="180" stroke="#cdeeff" stroke-width="3" stroke-linecap="round"/>
+<g class="turn"><line x1="400" y1="168" x2="400" y2="180" stroke="#cdeeff" stroke-width="3" stroke-linecap="round"/>
 <circle cx="400" cy="160" r="8" fill="#dff4ff"/><circle class="beacon" cx="400" cy="160" r="6"/>
 <ellipse cx="336" cy="238" rx="15" ry="27" fill="url(#cup)"/><ellipse cx="338" cy="238" rx="7" ry="19" fill="#02081c"/>
 <ellipse cx="464" cy="238" rx="15" ry="27" fill="url(#cup)"/><ellipse cx="462" cy="238" rx="7" ry="19" fill="#02081c"/>
@@ -72,12 +78,12 @@
 <path d="M473 224 q4 14 0 28" fill="none" stroke="#7fe8ff" stroke-width="2.2" stroke-linecap="round" class="led" style="animation-delay:.9s"/>
 <circle cx="400" cy="236" r="66" fill="url(#head)"/>
 <path d="M352 196 A62 62 0 0 1 438 190" fill="none" stroke="#ffffff" stroke-opacity=".75" stroke-width="3" stroke-linecap="round"/>
-<ellipse cx="400" cy="238" rx="48" ry="39" fill="url(#visor)"/>
+<g class="front"><ellipse cx="400" cy="238" rx="48" ry="39" fill="url(#visor)"/>
 <ellipse cx="400" cy="238" rx="48" ry="39" fill="none" stroke="#2b6bff" stroke-opacity=".55" stroke-width="1.5"/>
 <g class="eyes" fill="none" stroke="#10f0ff" stroke-width="6.5" stroke-linecap="round">
 <path d="M371 252 V240 a10 10 0 0 1 20 0 V252"/><path d="M409 252 V240 a10 10 0 0 1 20 0 V252"/>
 </g>
-</g></g>
+</g><g class="back" opacity="0"><rect x="372" y="214" width="56" height="44" rx="10" fill="#0a2160" fill-opacity=".55" stroke="#2b6bff" stroke-opacity=".6"/><path d="M382 226h36M382 236h36M382 246h36" stroke="#7fe8ff" stroke-opacity=".7" stroke-width="2.5" stroke-linecap="round"/><circle cx="400" cy="205" r="3" fill="#7fe8ff" class="led"/></g></g></g></g>
 <text x="400" y="104" text-anchor="middle" font-family="Inter,'Segoe UI',Helvetica,Arial,sans-serif" font-size="66" font-weight="800" letter-spacing="-1" fill="#ffffff">Eth<tspan fill="url(#gent)">gent</tspan></text>
 <text x="400" y="135" text-anchor="middle" font-family="Inter,'Segoe UI',Helvetica,Arial,sans-serif" font-size="17" fill="#e6efff">AI-powered multi-agent automation orchestrator</text>
 <text x="400" y="408" text-anchor="middle" font-family="Inter,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" fill="#4fbaff" letter-spacing=".5">Plan   •   Coordinate   •   Execute</text>
