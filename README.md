@@ -20,6 +20,7 @@ It ships tuned for **social media and content** (X, Instagram, YouTube, image an
 - [Features](#features)
 - [Make it your own](#make-it-your-own)
 - [Architecture](#architecture)
+- [The agents](#the-agents)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Terminal Commands](#terminal-commands)
@@ -67,7 +68,7 @@ Two illustrations. The names are examples and the tool files are yours to write;
     --desc "Application screening"
 ```
 
-The orchestrator then delegates to these agents the same way it does to the built-in ones. Because an agent is only reachable through its tools, giving an agent read-only tools is how you keep it read-only. A tool that changes something outside goes through the [approval gate](#approval-for-tools-that-change-something-outside).
+The orchestrator then delegates to these agents the same way it does to the built-in ones. Because an agent is only reachable through its tools, giving an agent read-only tools is how you keep it read-only. Tools marked as risky ask for approval in the terminal before they run.
 
 **Pulling from elsewhere.** Agents, sub-agents and tools do not have to be written locally. A pack from another repository installs with one command, after a preview and your confirmation:
 
@@ -95,6 +96,54 @@ main.py
 - **`AutomationCoordinator`** (`MarketingApp/environments/automation_runtime.py`) is a lock ensuring the terminal, heartbeat, and Telegram/Discord triggers never touch the shared browser session concurrently.
 - **`telemetry`** (`MarketingApp/telemetry.py`) is the operations store: a `run` is opened per unit of work (a chat turn, a heartbeat job) and carried in a `ContextVar`, so every log line and LLM call made inside it is attached to it automatically.
 - **`Agent Studio`** (`MarketingApp/llms/agent_studio.py`) reads `config/agents.yaml`, `config/custom_tools.yaml`, and `config/agent_packs.yaml` to assemble the runtime — agents and tools can be added, toggled, or reconfigured without touching code.
+
+## The agents
+
+The orchestrator (`BaseModel`) does not call tools directly: it hands a task to a **sub-agent**, and each sub-agent owns its own model and its own set of tools. A tool is reachable only through a sub-agent that lists it, so giving an agent read-only tools is how you keep it read-only. Seven sub-agents ship in `config/agents.yaml`; two are on by default. A deployment can add more (the MarketingPool example adds two, shown dashed), and so can you with `/agent create` or a pack.
+
+```mermaid
+flowchart TB
+    U([You: terminal, Telegram, Discord, heartbeat job]) --> O
+    O[BaseModel<br/>orchestrator] --> SM
+    O --> CC
+    subgraph on[On by default]
+        SM[sosyal_medya_agent<br/>X, Instagram, YouTube]
+        CC[content_creator_agent<br/>images, video, captions]
+    end
+    O -.-> BR
+    O -.-> CO
+    O -.-> AR
+    O -.-> SI
+    O -.-> VL
+    subgraph off[Shipped, off by default: /agent NAME on]
+        BR[browser_agent<br/>Selenium browsing]
+        CO[computer<br/>empty template]
+        AR[arastirma_agent<br/>deep web research]
+        SI[sistem_agent<br/>files, system tasks]
+        VL[vlm_agent<br/>screen, keyboard, mouse]
+    end
+    O -.-> AC
+    O -.-> PD
+    subgraph added[Added by a deployment, for example MarketingPool]
+        AC[asset_collector_agent<br/>an app's approved media]
+        PD[platform_data_agent<br/>read-only platform data]
+    end
+    style added stroke-dasharray: 5 5
+```
+
+| Sub-agent | What it does | Default | Model |
+|---|---|---|---|
+| `sosyal_medya_agent` | Publishing, engagement and notification scanning on X, Instagram and YouTube, driven through a signed-in browser session | on | `default` (follows `SUBMODEL_MODEL_NAME`) |
+| `content_creator_agent` | Captions, stock photo and video search, website-to-post extraction, HTML/CSS to PNG posts, MP4 reels | on | `default` |
+| `browser_agent` | Selenium-based navigation, DOM reading and form interaction | off | `browser_default` (follows `BROWSER_AGENT_MODEL`) |
+| `computer` | A blank Agent Studio template for computer-related tasks: no tools until you attach some | off | `default` |
+| `arastirma_agent` | Multi-query web research and report writing | off | Gemini Live (needs `GEMINI_API_KEY`) |
+| `sistem_agent` | File and workspace management, system status, terminal commands | off | Gemini Live |
+| `vlm_agent` | Screen capture and mouse/keyboard control with a self-verifying vision loop | off | Gemini Live |
+
+Turn one on with `/agent <name> on`, inspect it with `/agent show <name>`, and write your own with `/agent create` ([Terminal Commands](#terminal-commands)). Tools marked as risky ask for approval in the terminal before they run.
+
+**The two a deployment can add.** `asset_collector_agent` lists, validates and prepares the approved media an application exposes. `platform_data_agent` asks a separate worker for read-only platform data and never holds the platform's credentials. Both live in the MarketingPool copy of this agent, not in this repository; they show that adding a sub-agent is a configuration step, not a change to the orchestrator.
 
 ## Quick Start
 
@@ -202,7 +251,7 @@ The code is compiled, checked for a function named after the tool, and actually 
 /agent pack install github:user/repo[@branch][#sub/dir]   # shallow-clones the repo, shows the preview, asks before installing
 ```
 
-`export` writes `plugin.yaml`, `agents/`, `prompts/`, `tools/`, a README and an `env.example` that contains variable **names only** — never values. Builtin tools cannot be packaged (they already exist in every install). Builtin agents *can* be packaged: one you scaffolded yourself (`/agent create --builtin`) travels with its own `submodels/<name>.py` source and installs even where it doesn't exist yet; one of the six agents the app ships with (`sosyal_medya_agent`, `content_creator_agent`, …) travels as config only — model/tools/prompt — since the target install already has its code.
+`export` writes `plugin.yaml`, `agents/`, `prompts/`, `tools/`, a README and an `env.example` that contains variable **names only** — never values. Builtin tools cannot be packaged (they already exist in every install). Builtin agents *can* be packaged: one you scaffolded yourself (`/agent create --builtin`) travels with its own `submodels/<name>.py` source and installs even where it doesn't exist yet; one of the seven agents the app ships with (`sosyal_medya_agent`, `content_creator_agent`, …) travels as config only — model/tools/prompt — since the target install already has its code.
 
 ## Operations: logs, run history, usage
 
