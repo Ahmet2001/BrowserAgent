@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Ethgent has moved to [ethosoftai/Ethgent](https://github.com/ethosoftai/Ethgent).** New work happens there; this repository is kept for its history.
+
 <p align="center">
   <img src="assets/ethgent-cover-coral.svg" alt="Ethgent - AI-powered multi-agent automation orchestrator" width="800" />
 </p>
